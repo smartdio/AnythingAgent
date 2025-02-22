@@ -1,0 +1,16 @@
+# 模型基本信息
+name: test_model
+version: 1.1.0
+description: 这是一个用于测试模型部署机制的简单模型，已更新配置
+
+# 模型参数
+parameters:
+  temperature: 0.9
+  max_tokens: 200
+  top_p: 0.8
+
+# 其他设置
+settings:
+  use_stream: true
+  debug_mode: true
+  batch_size: 16 

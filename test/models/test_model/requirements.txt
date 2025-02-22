@@ -1,0 +1,9 @@
+# 基础依赖
+fastapi>=0.109.2
+pydantic>=2.6.1
+
+# 异步支持
+aiofiles>=23.2.1
+
+# 工具依赖
+python-multipart>=0.0.9 
