@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  api:
+    build: 
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../.env:/app/.env
+      - ../models:/app/models
+      - ../data:/app/data
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=1
+      - LANCEDB_URI=/app/data/lancedb
+    networks:
+      - anything_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  anything_network:
+    driver: bridge
