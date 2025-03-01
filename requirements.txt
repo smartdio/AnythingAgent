@@ -12,4 +12,7 @@ numpy==1.26.4
 pandas==2.2.0
 python-multipart==0.0.9
 aiofiles==23.2.1
-tenacity==8.2.3 
+tenacity==8.2.3
+crewai==0.102.0
+pyyaml==6.0.1
+langchain>=0.3.10 
