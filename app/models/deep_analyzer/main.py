@@ -694,6 +694,8 @@ class DeepAnalyzerModel(VectorModel):
                     
                     # 添加到结果列表
                     results.append(full_response)
+                    results.append("\n\n")
+                    await self._safe_callback(callback, "\n\n")
                     
                 except Exception as e:
                     error_message = f"执行任务 {task_id} 时出错: {str(e)}"
@@ -717,6 +719,7 @@ class DeepAnalyzerModel(VectorModel):
                     self._write_debug(f"任务 {task_id} 执行完成，结果长度: {len(execution_result)}")
                     self._write_debug(f"任务 {task_id} 执行结果:\n{execution_result}")
                     results.append(execution_result)
+                    results.append("\n\n")
                 except Exception as e:
                     error_message = f"执行任务 {task_id} 时出错: {str(e)}"
                     logger.error(error_message)
