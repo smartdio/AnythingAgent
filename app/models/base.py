@@ -56,7 +56,7 @@ class AnythingBaseModel(ABC):
             except Exception as e:
                 logger.error(f"加载配置文件时出错: {str(e)}")
                 self.config = {}
-
+    
     def _init_llm(self) -> None:
         """
         初始化LLM配置，从配置文件、环境变量或.env文件中获取

@@ -27,7 +27,14 @@ class DeepAnalyzerModel(VectorModel):
     """
     
     def __init__(self):
+        # 设置配置文件路径
+        self.config_path = Path(__file__).parent / "config.yaml"
+        # 初始化配置文件修改时间
+        self._config_mtime = 0
+        
+        # 调用父类初始化方法
         super().__init__()
+        
         # 加载模型特定配置
         self.config = self._load_config()
         
@@ -41,15 +48,17 @@ class DeepAnalyzerModel(VectorModel):
         Returns:
             配置字典
         """
-        config_path = Path(__file__).parent / "config.yaml"
-        if not config_path.exists():
-            logger.warning(f"配置文件不存在: {config_path}")
+        if not self.config_path.exists():
+            logger.warning(f"配置文件不存在: {self.config_path}")
             return {}
         
         try:
-            with open(config_path, 'r', encoding='utf-8') as f:
+            # 更新配置文件修改时间
+            self._config_mtime = self.config_path.stat().st_mtime
+            
+            with open(self.config_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
-                logger.info(f"已加载配置文件: {config_path}")
+                logger.info(f"已加载配置文件: {self.config_path}")
                 
                 # 打印配置文件的主要部分
                 logger.info(f"配置文件包含以下主要部分: {list(config.keys())}")
@@ -188,7 +197,49 @@ class DeepAnalyzerModel(VectorModel):
         await super().on_chat_start()
         # 初始化聊天会话
         # 注意：向量存储相关逻辑已移至ModelManager处理
+        
+        # 每次对话开始时重新加载配置，确保实时更新
+        self._reload_config()
+        
+        logger.info("聊天会话已初始化")
+        self._write_debug("=== 新的聊天会话已初始化 ===")
     
+    def _reload_config(self) -> None:
+        """
+        重新加载配置文件，确保实时更新
+        """
+        if not self.config_path.exists():
+            logger.warning(f"配置文件不存在: {self.config_path}")
+            return
+            
+        # 检查文件修改时间
+        current_mtime = self.config_path.stat().st_mtime
+        
+        # 如果文件修改时间没有变化，则不重新加载
+        if current_mtime <= self._config_mtime:
+            logger.debug("配置文件未修改，跳过重新加载")
+            return
+            
+        # 记录旧配置的哈希值，用于比较是否有变化
+        old_config_hash = hash(json.dumps(self.config, sort_keys=True)) if self.config else None
+        
+        # 重新加载配置
+        self.config = self._load_config()
+        
+        # 计算新配置的哈希值
+        new_config_hash = hash(json.dumps(self.config, sort_keys=True)) if self.config else None
+        
+        # 检查配置是否有变化
+        if old_config_hash != new_config_hash:
+            logger.info("检测到配置文件变化，已重新加载")
+            self._write_debug("=== 配置文件已重新加载 ===")
+            self._write_debug(f"配置文件修改时间: {datetime.datetime.fromtimestamp(current_mtime).strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # 如果配置文件中有LLM配置，覆盖系统默认配置
+            self._override_llm_config()
+        else:
+            logger.debug("配置文件内容未发生变化，但文件修改时间已更新")
+
     async def on_chat_messages(
         self,
         messages: List[Dict[str, str]],
@@ -241,6 +292,439 @@ class DeepAnalyzerModel(VectorModel):
         
         return None if callback else result
     
+    def _format_history_context(self, history_messages: List[Dict[str, str]]) -> str:
+        """
+        格式化历史消息为上下文字符串
+        
+        Args:
+            history_messages: 历史消息列表
+            
+        Returns:
+            str: 格式化后的历史上下文
+        """
+        history_context = ""
+        if history_messages:
+            history_context = "历史对话：\n"
+            for msg in history_messages:
+                role = "用户" if msg["role"] == "user" else "助手"
+                history_context += f"{role}: {msg['content']}\n"
+            history_context += "\n"
+            
+        return history_context
+
+    def _build_analyzer_prompts(
+        self, 
+        task_templates: Dict[str, Any], 
+        agent_config: Dict[str, Any],
+        history_context: str,
+        user_message: str,
+        system_message: str
+    ) -> tuple:
+        """
+        构建分析阶段的提示词
+        
+        Args:
+            task_templates: 任务模板配置
+            agent_config: Agent配置
+            history_context: 历史对话上下文
+            user_message: 用户消息
+            system_message: 系统消息
+            
+        Returns:
+            tuple: (analyzer_system_prompt, analyze_task_description)
+        """
+        # 获取分析器配置
+        analyzer_config = agent_config.get("analyzer_agent", {})
+        analyzer_role = analyzer_config.get("role", "信息分析专家")
+        analyzer_goal = analyzer_config.get("goal", "分析用户消息和系统消息，判断信息是否足够")
+        analyzer_backstory = analyzer_config.get("backstory", "你是一个专业的信息分析专家，能够深入理解用户需求，判断提供的信息是否足够执行任务。")
+        
+        # 创建分析任务提示词
+        analyze_task_template = ""
+        if "analyze_task" in task_templates and isinstance(task_templates["analyze_task"], dict) and "description" in task_templates["analyze_task"]:
+            analyze_task_template = task_templates["analyze_task"]["description"]
+            logger.info(f"成功获取配置文件中的分析任务模板，长度: {len(analyze_task_template)}")
+            self._write_debug(f"使用配置文件中的分析任务模板，长度: {len(analyze_task_template)}")
+            logger.info(f"分析任务模板前200个字符: {analyze_task_template[:200]}...")
+        else:
+            logger.warning("配置文件中没有分析任务模板或格式不正确，使用默认模板")
+            self._write_debug("配置文件中没有分析任务模板或格式不正确，使用默认模板")
+            analyze_task_template = DEFAULT_ANALYZE_TASK_TEMPLATE
+        
+        # 格式化模板
+        analyze_task_description = analyze_task_template.format(
+            history_context=history_context,
+            user_message=user_message,
+            system_message=system_message
+        )
+        
+        # 构建系统提示词
+        analyzer_system_prompt = DEFAULT_ANALYZER_SYSTEM_PROMPT.format(
+            analyzer_role=analyzer_role,
+            analyzer_backstory=analyzer_backstory,
+            analyzer_goal=analyzer_goal
+        )
+        
+        # 打印要发送给LLM的信息
+        logger.info(f"分析阶段 - 发送给LLM的信息 - 模型: {self.llm_config['provider']}/{self.llm_config['model']}")
+        logger.info(f"分析阶段 - 系统提示词: {analyzer_system_prompt}")
+        logger.info(f"分析阶段 - 用户提示词: {analyze_task_description[:200]}..." if len(analyze_task_description) > 200 else f"分析阶段 - 用户提示词: {analyze_task_description}")
+        
+        return analyzer_system_prompt, analyze_task_description
+    
+    def _build_planner_prompts(
+        self, 
+        task_templates: Dict[str, Any], 
+        agent_config: Dict[str, Any],
+        history_context: str,
+        user_message: str
+    ) -> tuple:
+        """
+        构建规划阶段的提示词
+        
+        Args:
+            task_templates: 任务模板配置
+            agent_config: Agent配置
+            history_context: 历史对话上下文
+            user_message: 用户消息
+            
+        Returns:
+            tuple: (planner_system_prompt, planning_task_description)
+        """
+        # 获取规划器配置
+        planner_config = agent_config.get("planner_agent", {})
+        planner_role = planner_config.get("role", "任务规划专家")
+        planner_goal = planner_config.get("goal", "根据用户需求分解任务计划")
+        planner_backstory = planner_config.get("backstory", "你是一个专业的任务规划专家，能够将复杂任务分解为可执行的子任务。")
+        
+        # 创建规划任务提示词
+        planning_task_template = ""
+        if "planning_task" in task_templates and isinstance(task_templates["planning_task"], dict) and "description" in task_templates["planning_task"]:
+            planning_task_template = task_templates["planning_task"]["description"]
+            logger.info(f"成功获取配置文件中的规划任务模板，长度: {len(planning_task_template)}")
+            self._write_debug(f"使用配置文件中的规划任务模板，长度: {len(planning_task_template)}")
+            logger.info(f"规划任务模板前200个字符: {planning_task_template[:200]}...")
+        else:
+            logger.warning("配置文件中没有规划任务模板或格式不正确，使用默认模板")
+            self._write_debug("配置文件中没有规划任务模板或格式不正确，使用默认模板")
+            planning_task_template = DEFAULT_PLANNING_TASK_TEMPLATE
+        
+        # 格式化模板
+        planning_task_description = planning_task_template.format(
+            history_context=history_context,
+            user_message=user_message
+        )
+        
+        # 构建系统提示词
+        planner_system_prompt = DEFAULT_PLANNER_SYSTEM_PROMPT.format(
+            planner_role=planner_role,
+            planner_backstory=planner_backstory,
+            planner_goal=planner_goal
+        )
+        
+        # 打印要发送给LLM的信息
+        logger.info(f"规划阶段 - 发送给LLM的信息 - 模型: {self.llm_config['provider']}/{self.llm_config['model']}")
+        logger.info(f"规划阶段 - 系统提示词: {planner_system_prompt}")
+        logger.info(f"规划阶段 - 用户提示词: {planning_task_description[:200]}..." if len(planning_task_description) > 200 else f"规划阶段 - 用户提示词: {planning_task_description}")
+        
+        return planner_system_prompt, planning_task_description
+    
+    def _build_worker_prompts(
+        self, 
+        task_templates: Dict[str, Any], 
+        agent_config: Dict[str, Any],
+        history_context: str,
+        task_title: str,
+        task_prompt: str
+    ) -> tuple:
+        """
+        构建执行阶段的提示词
+        
+        Args:
+            task_templates: 任务模板配置
+            agent_config: Agent配置
+            history_context: 历史对话上下文
+            task_title: 任务标题
+            task_prompt: 任务描述
+            
+        Returns:
+            tuple: (worker_system_prompt, execution_task_description)
+        """
+        # 获取执行器配置
+        worker_config = agent_config.get("worker_agent", {})
+        worker_role = worker_config.get("role", "任务执行专家")
+        worker_goal = worker_config.get("goal", "执行具体任务并返回结果")
+        worker_backstory = worker_config.get("backstory", "你是一个专业的任务执行专家，能够高效准确地完成各种任务。")
+        
+        # 构建系统提示词
+        worker_system_prompt = DEFAULT_WORKER_SYSTEM_PROMPT.format(
+            worker_role=worker_role,
+            worker_backstory=worker_backstory,
+            worker_goal=worker_goal
+        )
+        
+        # 创建执行任务提示词
+        execution_task_template = ""
+        if "execution_task" in task_templates and isinstance(task_templates["execution_task"], dict) and "description" in task_templates["execution_task"]:
+            execution_task_template = task_templates["execution_task"]["description"]
+            logger.info(f"成功获取配置文件中的执行任务模板，长度: {len(execution_task_template)}")
+            self._write_debug(f"使用配置文件中的执行任务模板，长度: {len(execution_task_template)}")
+            logger.info(f"执行任务模板前200个字符: {execution_task_template[:200]}...")
+        else:
+            logger.warning("配置文件中没有执行任务模板或格式不正确，使用默认模板")
+            self._write_debug("配置文件中没有执行任务模板或格式不正确，使用默认模板")
+            execution_task_template = DEFAULT_EXECUTION_TASK_TEMPLATE
+        
+        # 格式化模板
+        execution_task_description = execution_task_template.format(
+            history_context=history_context,
+            task_title=task_title,
+            task_prompt=task_prompt
+        )
+        
+        # 打印要发送给LLM的信息
+        logger.info(f"执行阶段 - 任务 {task_title} - 发送给LLM的信息 - 模型: {self.llm_config['provider']}/{self.llm_config['model']}")
+        logger.info(f"执行阶段 - 任务 {task_title} - 系统提示词: {worker_system_prompt}")
+        logger.info(f"执行阶段 - 任务 {task_title} - 用户提示词: {execution_task_description[:200]}..." if len(execution_task_description) > 200 else f"执行阶段 - 任务 {task_title} - 用户提示词: {execution_task_description}")
+        
+        return worker_system_prompt, execution_task_description
+
+    def _get_config_data(self) -> tuple:
+        """
+        获取配置数据，包括任务模板和Agent配置
+        
+        Returns:
+            tuple: (task_templates, agent_config)
+        """
+        # 从配置文件获取Agent和Task配置
+        agent_config = self.config.get("agent", {})
+        task_templates = self.config.get("task_templates", {})
+        
+        # 打印获取到的任务模板，用于调试
+        logger.info(f"从配置文件获取的任务模板: {json.dumps(list(task_templates.keys()), ensure_ascii=False)}")
+        if task_templates:
+            for key in task_templates.keys():
+                logger.info(f"任务模板 '{key}' 是否包含description: {bool(task_templates.get(key, {}).get('description', ''))}")
+                if task_templates.get(key, {}).get('description', ''):
+                    template_desc = task_templates.get(key, {}).get('description', '')
+                    logger.info(f"任务模板 '{key}' 的description长度: {len(template_desc)}")
+                    logger.info(f"任务模板 '{key}' 的description前100个字符: {template_desc[:100]}...")
+        else:
+            logger.warning("配置文件中没有找到任何任务模板")
+            
+        return task_templates, agent_config
+
+    def _parse_tasks_data(self, planning_result: str, user_message: str) -> Dict[str, Dict[str, str]]:
+        """
+        解析任务计划数据
+        
+        Args:
+            planning_result: 规划阶段的结果
+            user_message: 用户消息，用于创建默认任务
+            
+        Returns:
+            Dict[str, Dict[str, str]]: 解析后的任务数据
+        """
+        # 记录原始规划结果
+        self._write_debug(f"原始规划结果:\n{planning_result}")
+        
+        try:
+            # 尝试解析JSON
+            tasks_data = json.loads(planning_result)
+        except json.JSONDecodeError as json_err:
+            # JSON解析错误，尝试修复常见问题
+            logger.error(f"JSON解析错误: {str(json_err)}")
+            self._write_debug(f"JSON解析错误: {str(json_err)}")
+            
+            # 尝试提取JSON部分
+            json_pattern = r"```json\s*([\s\S]*?)\s*```|```\s*([\s\S]*?)\s*```|\{[\s\S]*\}"
+            json_match = re.search(json_pattern, planning_result)
+            if json_match:
+                json_content = json_match.group(0)
+                # 如果匹配到的是代码块，提取内容
+                if json_content.startswith("```"):
+                    json_content = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", json_content).group(1)
+                
+                logger.info("从文本中提取JSON内容")
+                self._write_debug(f"提取的JSON内容:\n{json_content}")
+                try:
+                    tasks_data = json.loads(json_content)
+                except json.JSONDecodeError as inner_err:
+                    raise ValueError(f"无法解析提取的JSON内容: {str(inner_err)}")
+            else:
+                # 尝试创建一个简单的任务
+                logger.warning("无法解析JSON，创建默认任务")
+                self._write_debug("无法解析JSON，创建默认任务")
+                tasks_data = {
+                    "task1": {
+                        "title": "执行用户请求",
+                        "prompt": user_message
+                    }
+                }
+        
+        logger.info(f"解析到的任务数据: {tasks_data}")
+        self._write_debug(f"解析到的任务数据: {json.dumps(tasks_data, ensure_ascii=False, indent=2) if tasks_data else 'None'}")
+        
+        # 验证任务数据格式
+        if not tasks_data or not isinstance(tasks_data, dict):
+            logger.warning("任务计划格式不正确，创建默认任务")
+            self._write_debug("任务计划格式不正确，创建默认任务")
+            tasks_data = {
+                "task1": {
+                    "title": "执行用户请求",
+                    "prompt": user_message
+                }
+            }
+        
+        # 验证并修复任务数据
+        valid_tasks = {}
+        for task_id, task_info in tasks_data.items():
+            if not isinstance(task_info, dict):
+                logger.warning(f"任务 {task_id} 格式不正确，跳过")
+                continue
+                
+            # 检查必要字段
+            if 'title' not in task_info:
+                # 尝试从其他字段获取标题
+                if 'name' in task_info:
+                    task_info['title'] = task_info['name']
+                elif '标题' in task_info:
+                    task_info['title'] = task_info['标题']
+                else:
+                    # 使用任务ID作为标题
+                    task_info['title'] = f"任务 {task_id}"
+                    
+            if 'prompt' not in task_info:
+                # 尝试从其他字段获取描述
+                if 'description' in task_info:
+                    task_info['prompt'] = task_info['description']
+                elif '描述' in task_info:
+                    task_info['prompt'] = task_info['描述']
+                elif 'content' in task_info:
+                    task_info['prompt'] = task_info['content']
+                else:
+                    # 使用标题作为描述
+                    task_info['prompt'] = task_info.get('title', f"执行任务 {task_id}")
+            
+            # 添加到有效任务列表
+            valid_tasks[task_id] = task_info
+        
+        if not valid_tasks:
+            logger.warning("没有找到有效的任务，创建默认任务")
+            valid_tasks = {
+                "task1": {
+                    "title": "执行用户请求",
+                    "prompt": user_message
+                }
+            }
+        
+        logger.info(f"有效任务数量: {len(valid_tasks)}")
+        self._write_debug(f"有效任务数量: {len(valid_tasks)}")
+        self._write_debug(f"有效任务数据: {json.dumps(valid_tasks, ensure_ascii=False, indent=2)}")
+        
+        return valid_tasks
+
+    async def _execute_tasks(
+        self, 
+        valid_tasks: Dict[str, Dict[str, str]], 
+        task_templates: Dict[str, Any], 
+        agent_config: Dict[str, Any],
+        history_context: str,
+        callback: Optional[Callable[[str], Awaitable[None]]] = None
+    ) -> List[str]:
+        """
+        执行任务并返回结果
+        
+        Args:
+            valid_tasks: 有效的任务数据
+            task_templates: 任务模板配置
+            agent_config: Agent配置
+            history_context: 历史对话上下文
+            callback: 用于流式输出的异步回调函数
+            
+        Returns:
+            List[str]: 任务执行结果列表
+        """
+        results = []
+        
+        # 输出任务标题和描述
+        task_summary = "# 任务执行计划\n\n"
+        for task_id, task_info in valid_tasks.items():
+            task_title = task_info.get('title', f"任务 {task_id}")
+            task_summary += f"- {task_title}\n"
+        task_summary += "\n"
+        await self._safe_callback(callback, task_summary)
+        
+        await self._safe_callback(callback, "</think>\n")
+        
+        # 执行任务并使用流式输出
+        for task_id, task_info in valid_tasks.items():
+            task_title = task_info.get('title', f"任务 {task_id}")
+            task_prompt = task_info.get('prompt', task_title)
+            
+            logger.info(f"执行任务: {task_id} - {task_title}")
+            self._write_debug(f"执行任务: {task_id} - {task_title}")
+            
+            # await self._safe_callback(callback, f"\n### {task_title}\n\n")
+            
+            # 构建执行阶段提示词
+            worker_system_prompt, execution_task_description = self._build_worker_prompts(
+                task_templates, 
+                agent_config, 
+                history_context, 
+                task_title, 
+                task_prompt
+            )
+            
+            # 使用流式输出调用LLM
+            if callback:
+                # 流式模式
+                try:
+                    # 调用LiteLLM执行任务，使用流式输出和回调
+                    full_response = await self._call_llm(
+                        system_prompt=worker_system_prompt,
+                        user_prompt=execution_task_description,
+                        stream=True,
+                        stream_callback=callback
+                    )
+                    
+                    # 写入调试文件
+                    self._write_debug(f"任务 {task_id} 执行完成，结果长度: {len(full_response)}")
+                    self._write_debug(f"任务 {task_id} 执行结果:\n{full_response}")
+                    
+                    # 添加到结果列表
+                    results.append(full_response)
+                    
+                except Exception as e:
+                    error_message = f"执行任务 {task_id} 时出错: {str(e)}"
+                    logger.error(error_message)
+                    self._write_debug(error_message)
+                    await self._safe_callback(callback, f"\n出错: {error_message}\n")
+                    results.append(error_message)
+            else:
+                # 非流式模式
+                try:
+                    # 调用LiteLLM执行任务
+                    execution_result = await self._call_llm(
+                        system_prompt=worker_system_prompt,
+                        user_prompt=execution_task_description
+                    )
+                    
+                    # 打印LLM响应结果
+                    logger.info(f"执行阶段 - 任务 {task_id} - LLM响应结果: {execution_result[:200]}..." if len(execution_result) > 200 else f"执行阶段 - 任务 {task_id} - LLM响应结果: {execution_result}")
+                    
+                    logger.info(f"任务 {task_id} 执行完成，结果长度: {len(execution_result)}")
+                    self._write_debug(f"任务 {task_id} 执行完成，结果长度: {len(execution_result)}")
+                    self._write_debug(f"任务 {task_id} 执行结果:\n{execution_result}")
+                    results.append(execution_result)
+                except Exception as e:
+                    error_message = f"执行任务 {task_id} 时出错: {str(e)}"
+                    logger.error(error_message)
+                    self._write_debug(error_message)
+                    results.append(error_message)
+        
+        return results
+
     async def _process_with_litellm(
         self,
         user_message: str,
@@ -261,30 +745,11 @@ class DeepAnalyzerModel(VectorModel):
             处理结果
         """
         try:
-            # 从配置文件获取Agent和Task配置
-            agent_config = self.config.get("agent", {})
-            task_templates = self.config.get("task_templates", {})
-            
-            # 打印获取到的任务模板，用于调试
-            logger.info(f"从配置文件获取的任务模板: {json.dumps(list(task_templates.keys()), ensure_ascii=False)}")
-            if task_templates:
-                for key in task_templates.keys():
-                    logger.info(f"任务模板 '{key}' 是否包含description: {bool(task_templates.get(key, {}).get('description', ''))}")
-                    if task_templates.get(key, {}).get('description', ''):
-                        template_desc = task_templates.get(key, {}).get('description', '')
-                        logger.info(f"任务模板 '{key}' 的description长度: {len(template_desc)}")
-                        logger.info(f"任务模板 '{key}' 的description前100个字符: {template_desc[:100]}...")
-            else:
-                logger.warning("配置文件中没有找到任何任务模板")
+            # 获取配置数据
+            task_templates, agent_config = self._get_config_data()
             
             # 格式化历史消息
-            history_context = ""
-            if history_messages:
-                history_context = "历史对话：\n"
-                for msg in history_messages:
-                    role = "用户" if msg["role"] == "user" else "助手"
-                    history_context += f"{role}: {msg['content']}\n"
-                history_context += "\n"
+            history_context = self._format_history_context(history_messages)
                 
             logger.info(f"处理用户消息: {user_message[:100]}..." if len(user_message) > 100 else f"处理用户消息: {user_message}")
             logger.info(f"历史消息数量: {len(history_messages)}")
@@ -301,41 +766,14 @@ class DeepAnalyzerModel(VectorModel):
             self._write_debug("=== 开始分析阶段 ===")
             await self._safe_callback(callback, "<think>正在分析您的消息...\n")
             
-            analyzer_config = agent_config.get("analyzer_agent", {})
-            analyzer_role = analyzer_config.get("role", "信息分析专家")
-            analyzer_goal = analyzer_config.get("goal", "分析用户消息和系统消息，判断信息是否足够")
-            analyzer_backstory = analyzer_config.get("backstory", "你是一个专业的信息分析专家，能够深入理解用户需求，判断提供的信息是否足够执行任务。")
-            
-            # 创建分析任务提示词
-            analyze_task_template = ""
-            if "analyze_task" in task_templates and isinstance(task_templates["analyze_task"], dict) and "description" in task_templates["analyze_task"]:
-                analyze_task_template = task_templates["analyze_task"]["description"]
-                logger.info(f"成功获取配置文件中的分析任务模板，长度: {len(analyze_task_template)}")
-                self._write_debug(f"使用配置文件中的分析任务模板，长度: {len(analyze_task_template)}")
-                logger.info(f"分析任务模板前200个字符: {analyze_task_template[:200]}...")
-            else:
-                logger.warning("配置文件中没有分析任务模板或格式不正确，使用默认模板")
-                self._write_debug("配置文件中没有分析任务模板或格式不正确，使用默认模板")
-                analyze_task_template = DEFAULT_ANALYZE_TASK_TEMPLATE
-            
-            analyze_task_description = analyze_task_template.format(
-                history_context=history_context,
-                user_message=user_message,
-                system_message=system_message
+            # 构建分析阶段提示词
+            analyzer_system_prompt, analyze_task_description = self._build_analyzer_prompts(
+                task_templates, 
+                agent_config, 
+                history_context, 
+                user_message, 
+                system_message
             )
-        
-            
-            # 构建分析阶段的系统提示词
-            analyzer_system_prompt = DEFAULT_ANALYZER_SYSTEM_PROMPT.format(
-                analyzer_role=analyzer_role,
-                analyzer_backstory=analyzer_backstory,
-                analyzer_goal=analyzer_goal
-            )
-            
-            # 打印要发送给LLM的信息
-            logger.info(f"分析阶段 - 发送给LLM的信息 - 模型: {self.llm_config['provider']}/{self.llm_config['model']}")
-            logger.info(f"分析阶段 - 系统提示词: {analyzer_system_prompt}")
-            logger.info(f"分析阶段 - 用户提示词: {analyze_task_description[:200]}..." if len(analyze_task_description) > 200 else f"分析阶段 - 用户提示词: {analyze_task_description}")
             
             # 调用LiteLLM进行分析
             analysis_result = await self._call_llm(
@@ -363,39 +801,14 @@ class DeepAnalyzerModel(VectorModel):
             # 3. 规划阶段
             logger.info("开始规划阶段")
             self._write_debug("=== 开始规划阶段 ===")
-            planner_config = agent_config.get("planner_agent", {})
-            planner_role = planner_config.get("role", "任务规划专家")
-            planner_goal = planner_config.get("goal", "根据用户需求分解任务计划")
-            planner_backstory = planner_config.get("backstory", "你是一个专业的任务规划专家，能够将复杂任务分解为可执行的子任务。")
             
-            # 创建规划任务提示词
-            planning_task_template = ""
-            if "planning_task" in task_templates and isinstance(task_templates["planning_task"], dict) and "description" in task_templates["planning_task"]:
-                planning_task_template = task_templates["planning_task"]["description"]
-                logger.info(f"成功获取配置文件中的规划任务模板，长度: {len(planning_task_template)}")
-                self._write_debug(f"使用配置文件中的规划任务模板，长度: {len(planning_task_template)}")
-                logger.info(f"规划任务模板前200个字符: {planning_task_template[:200]}...")
-            else:
-                logger.warning("配置文件中没有规划任务模板或格式不正确，使用默认模板")
-                self._write_debug("配置文件中没有规划任务模板或格式不正确，使用默认模板")
-                planning_task_template = DEFAULT_PLANNING_TASK_TEMPLATE
-            
-            planning_task_description = planning_task_template.format(
-                history_context=history_context,
-                user_message=user_message
+            # 构建规划阶段提示词
+            planner_system_prompt, planning_task_description = self._build_planner_prompts(
+                task_templates, 
+                agent_config, 
+                history_context, 
+                user_message
             )
-            
-            # 构建规划阶段的系统提示词
-            planner_system_prompt = DEFAULT_PLANNER_SYSTEM_PROMPT.format(
-                planner_role=planner_role,
-                planner_backstory=planner_backstory,
-                planner_goal=planner_goal
-            )
-            
-            # 打印要发送给LLM的信息
-            logger.info(f"规划阶段 - 发送给LLM的信息 - 模型: {self.llm_config['provider']}/{self.llm_config['model']}")
-            logger.info(f"规划阶段 - 系统提示词: {planner_system_prompt}")
-            logger.info(f"规划阶段 - 用户提示词: {planning_task_description[:200]}..." if len(planning_task_description) > 200 else f"规划阶段 - 用户提示词: {planning_task_description}")
             
             # 调用LiteLLM进行规划
             planning_result = await self._call_llm(
@@ -409,221 +822,24 @@ class DeepAnalyzerModel(VectorModel):
             logger.info(f"规划阶段结果: {planning_result[:200]}..." if len(planning_result) > 200 else f"规划阶段结果: {planning_result}")
             self._write_debug(f"规划阶段结果:\n{planning_result}")
             
-            if callback:
-                await self._safe_callback(callback, "任务规划完成，开始执行任务...\n")
+            # await self._safe_callback(callback, "任务规划完成，开始执行任务...\n")
             
             # 4. 解析任务计划 - 规划阶段完成后直接进入执行阶段，不需要额外判断
             try:
-                # 记录原始规划结果
-                self._write_debug(f"原始规划结果:\n{planning_result}")
-                
-                # 尝试解析JSON
-                try:
-                    tasks_data = json.loads(planning_result)
-                except json.JSONDecodeError as json_err:
-                    # JSON解析错误，尝试修复常见问题
-                    logger.error(f"JSON解析错误: {str(json_err)}")
-                    self._write_debug(f"JSON解析错误: {str(json_err)}")
-                    
-                    # 尝试提取JSON部分
-                    json_pattern = r"```json\s*([\s\S]*?)\s*```|```\s*([\s\S]*?)\s*```|\{[\s\S]*\}"
-                    json_match = re.search(json_pattern, planning_result)
-                    if json_match:
-                        json_content = json_match.group(0)
-                        # 如果匹配到的是代码块，提取内容
-                        if json_content.startswith("```"):
-                            json_content = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", json_content).group(1)
-                        
-                        logger.info("从文本中提取JSON内容")
-                        self._write_debug(f"提取的JSON内容:\n{json_content}")
-                        try:
-                            tasks_data = json.loads(json_content)
-                        except json.JSONDecodeError as inner_err:
-                            raise ValueError(f"无法解析提取的JSON内容: {str(inner_err)}")
-                    else:
-                        # 尝试创建一个简单的任务
-                        logger.warning("无法解析JSON，创建默认任务")
-                        self._write_debug("无法解析JSON，创建默认任务")
-                        tasks_data = {
-                            "task1": {
-                                "title": "执行用户请求",
-                                "prompt": user_message
-                            }
-                        }
-                
-                logger.info(f"解析到的任务数据: {tasks_data}")
-                self._write_debug(f"解析到的任务数据: {json.dumps(tasks_data, ensure_ascii=False, indent=2) if tasks_data else 'None'}")
-                
-                # 验证任务数据格式
-                if not tasks_data or not isinstance(tasks_data, dict):
-                    logger.warning("任务计划格式不正确，创建默认任务")
-                    self._write_debug("任务计划格式不正确，创建默认任务")
-                    tasks_data = {
-                        "task1": {
-                            "title": "执行用户请求",
-                            "prompt": user_message
-                        }
-                    }
-                
-                # 验证并修复任务数据
-                valid_tasks = {}
-                for task_id, task_info in tasks_data.items():
-                    if not isinstance(task_info, dict):
-                        logger.warning(f"任务 {task_id} 格式不正确，跳过")
-                        continue
-                        
-                    # 检查必要字段
-                    if 'title' not in task_info:
-                        # 尝试从其他字段获取标题
-                        if 'name' in task_info:
-                            task_info['title'] = task_info['name']
-                        elif '标题' in task_info:
-                            task_info['title'] = task_info['标题']
-                        else:
-                            # 使用任务ID作为标题
-                            task_info['title'] = f"任务 {task_id}"
-                            
-                    if 'prompt' not in task_info:
-                        # 尝试从其他字段获取描述
-                        if 'description' in task_info:
-                            task_info['prompt'] = task_info['description']
-                        elif '描述' in task_info:
-                            task_info['prompt'] = task_info['描述']
-                        elif 'content' in task_info:
-                            task_info['prompt'] = task_info['content']
-                        else:
-                            # 使用标题作为描述
-                            task_info['prompt'] = task_info.get('title', f"执行任务 {task_id}")
-                    
-                    # 添加到有效任务列表
-                    valid_tasks[task_id] = task_info
-                
-                if not valid_tasks:
-                    logger.warning("没有找到有效的任务，创建默认任务")
-                    valid_tasks = {
-                        "task1": {
-                            "title": "执行用户请求",
-                            "prompt": user_message
-                        }
-                    }
-                
-                logger.info(f"有效任务数量: {len(valid_tasks)}")
-                self._write_debug(f"有效任务数量: {len(valid_tasks)}")
-                self._write_debug(f"有效任务数据: {json.dumps(valid_tasks, ensure_ascii=False, indent=2)}")
+                # 解析任务数据
+                valid_tasks = self._parse_tasks_data(planning_result, user_message)
                 
                 # 5. 执行阶段
                 logger.info("开始执行阶段")
                 self._write_debug("=== 开始执行阶段 ===")
-                worker_config = agent_config.get("worker_agent", {})
-                worker_role = worker_config.get("role", "任务执行专家")
-                worker_goal = worker_config.get("goal", "执行具体任务并返回结果")
-                worker_backstory = worker_config.get("backstory", "你是一个专业的任务执行专家，能够高效准确地完成各种任务。")
                 
-                results = []
-                
-                # 构建执行阶段的系统提示词
-                worker_system_prompt = DEFAULT_WORKER_SYSTEM_PROMPT.format(
-                    worker_role=worker_role,
-                    worker_backstory=worker_backstory,
-                    worker_goal=worker_goal
-                )
-                
-                # 6. 执行每个子任务
-                execution_task_template = ""
-                if "execution_task" in task_templates and isinstance(task_templates["execution_task"], dict) and "description" in task_templates["execution_task"]:
-                    execution_task_template = task_templates["execution_task"]["description"]
-                    logger.info(f"成功获取配置文件中的执行任务模板，长度: {len(execution_task_template)}")
-                    self._write_debug(f"使用配置文件中的执行任务模板，长度: {len(execution_task_template)}")
-                    logger.info(f"执行任务模板前200个字符: {execution_task_template[:200]}...")
-                else:
-                    logger.warning("配置文件中没有执行任务模板或格式不正确，使用默认模板")
-                    self._write_debug("配置文件中没有执行任务模板或格式不正确，使用默认模板")
-                    execution_task_template = DEFAULT_EXECUTION_TASK_TEMPLATE
-                
-                    
-                # 输出任务标题和描述
-                task_summary = "# 任务执行计划\n\n"
-                for task_id, task_info in valid_tasks.items():
-                    task_title = task_info.get('title', f"任务 {task_id}")
-                    task_summary += f"- {task_title}\n"
-                task_summary += "\n"
-                await self._safe_callback(callback, task_summary)
-                
-                await self._safe_callback(callback, "</think>\n")
-                
-                # 执行任务并使用流式输出
-                for task_id, task_info in valid_tasks.items():
-                    task_title = task_info.get('title', f"任务 {task_id}")
-                    task_prompt = task_info.get('prompt', task_title)
-                    
-                    logger.info(f"执行任务: {task_id} - {task_title}")
-                    self._write_debug(f"执行任务: {task_id} - {task_title}")
-                    
-                    await self._safe_callback(callback, f"\n### {task_title}\n\n")
-                    
-                    # 创建执行任务提示词
-                    execution_task_description = execution_task_template.format(
-                        history_context=history_context,
-                        task_title=task_title,
-                        task_prompt=task_prompt
-                    )
-                    
-                    # 打印要发送给LLM的信息
-                    logger.info(f"执行阶段 - 任务 {task_id} - 发送给LLM的信息 - 模型: {self.llm_config['provider']}/{self.llm_config['model']}")
-                    logger.info(f"执行阶段 - 任务 {task_id} - 系统提示词: {worker_system_prompt}")
-                    logger.info(f"执行阶段 - 任务 {task_id} - 用户提示词: {execution_task_description[:200]}..." if len(execution_task_description) > 200 else f"执行阶段 - 任务 {task_id} - 用户提示词: {execution_task_description}")
-                    
-                    # 使用流式输出调用LLM
-                    if callback:
-                        # 流式模式
-                        try:
-                            # 调用LiteLLM执行任务，使用流式输出和回调
-                            full_response = await self._call_llm(
-                                system_prompt=worker_system_prompt,
-                                user_prompt=execution_task_description,
-                                stream=True,
-                                stream_callback=callback
-                            )
-                            
-                            # 写入调试文件
-                            self._write_debug(f"任务 {task_id} 执行完成，结果长度: {len(full_response)}")
-                            self._write_debug(f"任务 {task_id} 执行结果:\n{full_response}")
-                            
-                            # 添加到结果列表
-                            results.append(full_response)
-                            
-                        except Exception as e:
-                            error_message = f"执行任务 {task_id} 时出错: {str(e)}"
-                            logger.error(error_message)
-                            self._write_debug(error_message)
-                            await self._safe_callback(callback, f"\n出错: {error_message}\n")
-                            results.append(error_message)
-                    else:
-                        # 非流式模式
-                        try:
-                            # 调用LiteLLM执行任务
-                            execution_result = await self._call_llm(
-                                system_prompt=worker_system_prompt,
-                                user_prompt=execution_task_description
-                            )
-                            
-                            # 打印LLM响应结果
-                            logger.info(f"执行阶段 - 任务 {task_id} - LLM响应结果: {execution_result[:200]}..." if len(execution_result) > 200 else f"执行阶段 - 任务 {task_id} - LLM响应结果: {execution_result}")
-                            
-                            logger.info(f"任务 {task_id} 执行完成，结果长度: {len(execution_result)}")
-                            self._write_debug(f"任务 {task_id} 执行完成，结果长度: {len(execution_result)}")
-                            self._write_debug(f"任务 {task_id} 执行结果:\n{execution_result}")
-                            results.append(execution_result)
-                        except Exception as e:
-                            error_message = f"执行任务 {task_id} 时出错: {str(e)}"
-                            logger.error(error_message)
-                            self._write_debug(error_message)
-                            results.append(error_message)
+                # 执行任务
+                results = await self._execute_tasks(valid_tasks, task_templates, agent_config, history_context, callback)
                 
                 # 7. 整合所有结果
                 if callback:
                     # 流式模式下已经输出了结果，只需要添加结束标记
-                    await self._safe_callback(callback, "\n\n# 任务执行完成")
+                    # await self._safe_callback(callback, "\n\n# 任务执行完成")
                     return None
                 else:
                     # 非流式模式下返回完整结果
