@@ -78,6 +78,40 @@ class MyModel(AnythingBaseModel):
         callback(message)
 ```
 
+#### Important Notes for Model Development
+
+1. **Environment Isolation**
+   - Each model runs in its own virtual environment
+   - Create a `config.yaml` in your model directory and set `isolation.enabled: true`
+   - Use `setup_venv.sh` to set up the virtual environment and install dependencies
+   - Create a `requirements.txt` for model-specific dependencies
+
+2. **Import Strategy**
+   - Avoid top-level imports of model-specific dependencies
+   - Use delayed imports inside methods to ensure environment isolation works:
+   ```python
+   async def on_chat_start(self):
+       # Import after environment is set up
+       from .my_module import MyDependency
+       self.dependency = MyDependency()
+   ```
+
+3. **Virtual Environment Structure**
+   - Place all model-specific files in the model directory
+   - The virtual environment will be created in `venv/` subdirectory
+   - A `.env_ready` file will be created when setup is complete
+
+4. **Configuration Example**
+   ```yaml
+   # config.yaml
+   isolation:
+     enabled: true
+     python_version: "3.11"
+     resources:
+       memory: "4G"
+       cpu: 2
+   ```
+
 ### Model Deployment
 
 Copy the developed model folder, such as `models/my_model`, to the `models` directory.

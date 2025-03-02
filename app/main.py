@@ -1,5 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+import time
+import os
+
 from app.core.config import settings
 from app.core.middleware import verify_api_key_middleware
 from app.core.logger import logger
@@ -44,6 +48,24 @@ app.include_router(
     tags=["models"]
 )
 
+# 添加请求处理时间中间件
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    response.headers["X-Process-Time"] = str(process_time)
+    return response
+
+# 全局异常处理
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Global exception: {str(exc)}")
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error"},
+    )
+
 @app.on_event("startup")
 async def startup_event():
     """
@@ -56,6 +78,13 @@ async def startup_event():
     # Auto-discover and load models
     model_manager.discover_models()
     logger.info(f"Loaded models: {list(model_manager.list_models().keys())}")
+
+    # 确保模型目录存在
+    os.makedirs(settings.MODELS_DIR, exist_ok=True)
+    
+    # 将所有模型描述添加到向量存储
+    model_manager.add_models_to_vector_store()
+    logger.info("Model descriptions added to vector store")
 
 @app.on_event("shutdown")
 async def shutdown_event():

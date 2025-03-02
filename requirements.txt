@@ -1,15 +1,31 @@
-fastapi==0.109.2
-uvicorn==0.27.1
-pydantic==2.6.1
-pydantic-settings==2.1.0
-python-dotenv==1.0.1
-sqlalchemy==2.0.27
-alembic==1.13.1
-pytest==8.0.1
-httpx==0.26.0
-lancedb==0.5.3
-numpy==1.26.4
-pandas==2.2.0
-python-multipart==0.0.9
-aiofiles==23.2.1
-tenacity==8.2.3 
+# 核心依赖
+fastapi>=0.115.8
+uvicorn>=0.34.0
+pydantic>=2.10.6
+pydantic-settings>=2.2.1
+python-dotenv>=1.0.1
+
+# 数据库相关
+sqlalchemy>=2.0.30
+alembic>=1.13.1
+lancedb>=0.5.7
+
+# 测试工具
+pytest>=8.3.3
+httpx>=0.28.1
+
+# 数据处理
+numpy>=2.2.3
+pandas>=2.2.3
+
+# 文件处理
+python-multipart>=0.0.20
+aiofiles>=23.2.1
+
+# 工具库
+tenacity>=9.0.0
+pyyaml>=6.0.2
+
+# AI 相关
+litellm>=1.61.20
+langchain>=0.3.19 

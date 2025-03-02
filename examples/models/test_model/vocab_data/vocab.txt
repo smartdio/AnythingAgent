@@ -1,0 +1,10 @@
+hello 你好
+world 世界
+test 测试
+model 模型
+deploy 部署
+stream 流式
+response 响应
+message 消息
+context 上下文
+config 配置 
