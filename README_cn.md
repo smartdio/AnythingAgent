@@ -75,10 +75,44 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 ```python
 class MyModel(AnythingBaseModel):
-    def on_chat_message(self, message: str,callback: Callable):
+    def on_chat_message(self, message: str, callback: Callable):
         # 处理消息
         callback(message)
 ```
+
+#### 模型开发注意事项
+
+1. **环境隔离**
+   - 每个模型运行在独立的虚拟环境中
+   - 在模型目录中创建 `config.yaml` 并设置 `isolation.enabled: true`
+   - 使用 `setup_venv.sh` 来设置虚拟环境和安装依赖
+   - 创建 `requirements.txt` 来管理模型特定的依赖
+
+2. **导入策略**
+   - 避免在顶层导入模型特定的依赖
+   - 在方法内部使用延迟导入以确保环境隔离正常工作：
+   ```python
+   async def on_chat_start(self):
+       # 在环境设置完成后导入
+       from .my_module import MyDependency
+       self.dependency = MyDependency()
+   ```
+
+3. **虚拟环境结构**
+   - 将所有模型相关文件放在模型目录中
+   - 虚拟环境将创建在 `venv/` 子目录中
+   - 设置完成后会创建 `.env_ready` 文件
+
+4. **配置示例**
+   ```yaml
+   # config.yaml
+   isolation:
+     enabled: true
+     python_version: "3.11"
+     resources:
+       memory: "4G"
+       cpu: 2
+   ```
 
 ### 模型部署
 

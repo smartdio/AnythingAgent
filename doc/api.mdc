@@ -1,0 +1,77 @@
+---
+description: 
+globs: 
+---
+# AnythingAgent API Documentation
+
+## Overview
+AnythingAgent implements OpenAI-compatible APIs, providing a flexible interface for AI model interactions. The API supports chat completions, text editing, content insertion, and file operations.
+
+## API Endpoints
+
+### 1. Chat Completions
+- **Endpoint**: `/v1/chat/completions`
+- **Method**: POST
+- **Description**: Generate conversational responses using AI models
+- **Key Parameters**:
+  - `model`: Model identifier (e.g., "gpt-3.5-turbo")
+  - `messages`: Array of message objects with role and content
+  - `temperature`: Creativity control (0-1)
+  - `max_tokens`: Maximum response length
+
+### 2. Text Editing
+- **Endpoint**: `/v1/edits`
+- **Method**: POST
+- **Description**: Modify text based on instructions
+- **Key Parameters**:
+  - `model`: Editing model identifier
+  - `input`: Original text
+  - `instruction`: Editing instructions
+
+### 3. Content Insertion
+- **Endpoint**: `/v1/insert`
+- **Method**: POST
+- **Description**: Insert new content into existing text
+- **Key Parameters**:
+  - `model`: Insertion model identifier
+  - `input`: Original text
+  - `insertion`: Content to insert
+  - `position`: Insertion position
+
+### 4. File Operations
+- **Endpoint**: `/v1/files`
+- **Methods**: POST, GET, DELETE
+- **Description**: Manage files for model training and data processing
+- **Operations**:
+  - Upload: POST `/v1/files`
+  - List: GET `/v1/files`
+  - Delete: DELETE `/v1/files/{file_id}`
+
+## File Integration
+Files can be integrated with chat completions for enhanced functionality:
+1. Upload files via `/v1/files`
+2. Reference files in chat completions using file IDs
+3. Use files for fine-tuning or as knowledge base
+
+## Response Format
+All API responses follow a standardized format:
+```json
+{
+  "id": "response-id",
+  "object": "response-type",
+  "created": timestamp,
+  "choices": [
+    {
+      "message/text": "content",
+      "finish_reason": "stop"
+    }
+  ]
+}
+```
+
+## Usage Guidelines
+- Use appropriate models for different tasks
+- Implement proper error handling
+- Consider rate limiting and token usage
+- Handle file size limitations (typically 100MB)
+- Follow security best practices for API key management 

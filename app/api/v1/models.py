@@ -45,7 +45,7 @@ async def list_models() -> Dict[str, Any]:
 
 @router.post("/models/deploy")
 async def deploy_model(
-    model_package: UploadFile = File(...),
+    package_file: UploadFile = File(...),
     replace_existing: bool = Form(False)
 ) -> JSONResponse:
     """
@@ -57,12 +57,12 @@ async def deploy_model(
     - data/: Data directory (optional)
     
     Args:
-        model_package: Model package file (zip format)
+        package_file: Model package file (zip format)
         replace_existing: Whether to replace existing model with the same name
     """
     try:
         # Validate file type
-        if not model_package.filename.endswith('.zip'):
+        if not package_file.filename.endswith('.zip'):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Only zip files are allowed"
@@ -71,9 +71,9 @@ async def deploy_model(
         # Create temporary directory
         with tempfile.TemporaryDirectory() as temp_dir:
             # Save uploaded file
-            temp_zip = Path(temp_dir) / model_package.filename
+            temp_zip = Path(temp_dir) / package_file.filename
             with temp_zip.open("wb") as buffer:
-                shutil.copyfileobj(model_package.file, buffer)
+                shutil.copyfileobj(package_file.file, buffer)
             
             # Extract files
             with zipfile.ZipFile(temp_zip) as zip_ref:

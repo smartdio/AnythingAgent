@@ -60,6 +60,27 @@ isolation:
 
 ### 环境隔离实现
 
+#### 1. 目录结构
+
+隔离环境的标准目录结构：
+
+```
+models/my_model/           # 模型目录
+├── main.py               # 模型主程序（必需）
+├── config.yaml           # 配置文件（必需）
+├── requirements.txt      # 依赖文件（必需）
+├── setup_venv.sh         # 环境设置脚本（必需）
+├── venv/                 # 虚拟环境目录
+│   ├── bin/             # 可执行文件
+│   ├── lib/             # 库文件
+│   └── .env_ready       # 环境就绪标记
+└── data/                # 数据目录（可选）
+    ├── vocab.txt
+    └── model.bin
+```
+
+#### 2. 环境设置
+
 1. 创建虚拟环境：
 ```bash
 # 在模型目录下创建虚拟环境
@@ -67,36 +88,93 @@ python -m venv venv
 
 # 安装依赖
 ./venv/bin/pip install -r requirements.txt
+
+# 创建环境就绪标记
+touch venv/.env_ready
 ```
 
-2. 启动隔离进程：
+2. 使用提供的脚本：
+```bash
+# 赋予执行权限
+chmod +x setup_venv.sh
+
+# 运行设置脚本
+./setup_venv.sh
+```
+
+#### 3. 导入策略
+
+为确保环境隔离正常工作，应该避免在模型文件顶层导入依赖，而是在方法内部使用延迟导入：
+
 ```python
-import subprocess
-import sys
-
-def run_isolated_model(model_dir: str, input_data: str) -> str:
-    venv_python = f"{model_dir}/venv/bin/python"
-    process = subprocess.Popen(
-        [venv_python, "main.py"],
-        cwd=model_dir,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
-    return process.communicate(input_data.encode())[0].decode()
+class MyModel(AnythingBaseModel):
+    def __init__(self):
+        super().__init__()
+        self.nlp = None
+        
+    async def on_chat_start(self):
+        # 延迟导入，等环境准备好后再导入
+        if self.nlp is None:
+            import spacy
+            self.nlp = spacy.load("en_core_web_sm")
 ```
 
-3. 资源限制：
-```python
-import resource
+#### 4. 资源限制
 
-def set_resource_limits(memory_mb: int):
-    # 设置内存限制
-    resource.setrlimit(
-        resource.RLIMIT_AS,
-        (memory_mb * 1024 * 1024, -1)
-    )
+在 `config.yaml` 中可以设置以下资源限制：
+
+```yaml
+isolation:
+  enabled: true
+  python_version: "3.11"  # Python 版本要求
+  resources:
+    memory: "4G"         # 内存限制
+    cpu: 2              # CPU 核心数限制
+    gpu: "1"           # GPU 限制（可选）
+    timeout: 30        # 操作超时时间（秒）
 ```
+
+#### 5. 环境检查
+
+系统会在加载模型时进行以下检查：
+
+1. 检查虚拟环境是否存在
+2. 检查 `.env_ready` 标记文件
+3. 检查 Python 版本是否符合要求
+4. 检查依赖是否已安装
+5. 检查资源是否满足要求
+
+### 环境隔离最佳实践
+
+1. 依赖管理
+   - 在 `requirements.txt` 中指定精确的版本号
+   - 使用 `pip freeze` 导出已测试的依赖版本
+   - 定期更新依赖以修复安全问题
+
+2. 资源控制
+   - 根据模型实际需求设置合理的资源限制
+   - 预留足够的内存防止 OOM
+   - 设置适当的超时时间
+
+3. 导入优化
+   - 使用延迟导入减少启动时间
+   - 在方法内部导入大型依赖
+   - 缓存已导入的模块实例
+
+4. 错误处理
+   - 捕获并处理依赖导入错误
+   - 提供有意义的错误信息
+   - 实现优雅的降级策略
+
+5. 安全考虑
+   - 限制虚拟环境的文件系统访问
+   - 避免在虚拟环境中安装不必要的包
+   - 定期更新依赖以修复安全漏洞
+
+6. 性能优化
+   - 合理设置进程数和线程数
+   - 使用异步操作避免阻塞
+   - 实现请求级别的缓存
 
 ## 模型目录结构
 

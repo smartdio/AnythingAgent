@@ -1,0 +1,26 @@
+name: aagent
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip=25.0.1
+  - pip:
+    - fastapi==0.115.8
+    - uvicorn==0.34.0
+    - pydantic==2.10.6
+    - pydantic-settings==2.2.1
+    - python-dotenv==1.0.1
+    - sqlalchemy==2.0.30
+    - alembic==1.13.1
+    - lancedb==0.5.7
+    - pytest==8.3.3
+    - httpx==0.28.1
+    - numpy==2.2.3
+    - pandas==2.2.3
+    - python-multipart==0.0.20
+    - aiofiles==23.2.1
+    - tenacity==9.0.0
+    - pyyaml==6.0.2
+    - litellm==1.61.20
+    - langchain==0.3.19 
