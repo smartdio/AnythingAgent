@@ -294,11 +294,11 @@ class LangChainAnalyzerModel(AnythingBaseModel):
             # 如果是流式模式，结果会通过callback发送
             if callback:
                 # 执行工作流
-                await self.workflow.invoke(initial_state)
+                await self.workflow.ainvoke(initial_state)
                 return None
             else:
                 # 非流式模式，返回最终结果
-                final_state = await self.workflow.invoke(initial_state)
+                final_state = await self.workflow.ainvoke(initial_state)
                 return final_state.get("final_result", "处理完成，但没有返回结果")
                 
         except Exception as e:
