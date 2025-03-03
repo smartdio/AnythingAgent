@@ -1048,10 +1048,9 @@ class LangChainAnalyzerModel(AnythingBaseModel):
             # 创建状态图
             workflow = StateGraph(AnalyzerState)
             
-            # 定义节点
+            # 定义节点函数
             
             # 1. 分析节点 - 分析用户输入，判断是否需要继续执行
-            @workflow.node
             async def analyzer(state: AnalyzerState) -> AnalyzerState:
                 """分析用户输入，判断是否需要继续执行"""
                 logger.info("执行分析节点")
@@ -1082,7 +1081,6 @@ class LangChainAnalyzerModel(AnythingBaseModel):
                 return state
             
             # 2. 规划节点 - 规划任务
-            @workflow.node
             async def planner(state: AnalyzerState) -> AnalyzerState:
                 """规划任务"""
                 logger.info("执行规划节点")
@@ -1131,7 +1129,6 @@ class LangChainAnalyzerModel(AnythingBaseModel):
                 return state
             
             # 3. 执行节点 - 执行任务
-            @workflow.node
             async def executor(state: AnalyzerState) -> AnalyzerState:
                 """执行任务"""
                 logger.info("执行任务节点")
@@ -1210,7 +1207,6 @@ class LangChainAnalyzerModel(AnythingBaseModel):
                 return state
             
             # 4. 直接回复节点 - 当分析结果不需要继续执行时，直接返回分析结果
-            @workflow.node
             async def direct_response(state: AnalyzerState) -> AnalyzerState:
                 """直接返回分析结果"""
                 logger.info("执行直接回复节点")
@@ -1222,20 +1218,33 @@ class LangChainAnalyzerModel(AnythingBaseModel):
                 
                 return state
             
-            # 定义边和条件
+            # 添加节点到工作流
+            workflow.add_node("analyzer", analyzer)
+            workflow.add_node("planner", planner)
+            workflow.add_node("executor", executor)
+            workflow.add_node("direct_response", direct_response)
+            
+            # 定义边和条件函数
             
             # 从分析节点开始
             workflow.set_entry_point("analyzer")
             
             # 分析节点到规划节点的条件：分析结果包含'NEXT-AGENT'
-            @workflow.edge("analyzer", "planner")
             def should_continue(state: AnalyzerState) -> bool:
                 return "NEXT-AGENT" in state["analysis_result"]
             
             # 分析节点到直接回复节点的条件：分析结果不包含'NEXT-AGENT'
-            @workflow.edge("analyzer", "direct_response")
             def should_respond_directly(state: AnalyzerState) -> bool:
                 return "NEXT-AGENT" not in state["analysis_result"]
+            
+            # 添加条件边
+            workflow.add_conditional_edges(
+                "analyzer",
+                {
+                    should_continue: "planner",
+                    should_respond_directly: "direct_response"
+                }
+            )
             
             # 规划节点到执行节点
             workflow.add_edge("planner", "executor")
