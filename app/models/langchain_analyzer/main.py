@@ -1229,21 +1229,10 @@ class LangChainAnalyzerModel(AnythingBaseModel):
             # 从分析节点开始
             workflow.set_entry_point("analyzer")
             
-            # 分析节点到规划节点的条件：分析结果包含'NEXT-AGENT'
-            def should_continue(state: AnalyzerState) -> bool:
-                return "NEXT-AGENT" in state["analysis_result"]
-            
-            # 分析节点到直接回复节点的条件：分析结果不包含'NEXT-AGENT'
-            def should_respond_directly(state: AnalyzerState) -> bool:
-                return "NEXT-AGENT" not in state["analysis_result"]
-            
             # 添加条件边
             workflow.add_conditional_edges(
                 "analyzer",
-                {
-                    should_continue: "planner",
-                    should_respond_directly: "direct_response"
-                }
+                lambda state: "planner" if "NEXT-AGENT" in state["analysis_result"] else "direct_response"
             )
             
             # 规划节点到执行节点
