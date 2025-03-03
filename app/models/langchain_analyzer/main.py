@@ -906,9 +906,11 @@ class LangChainAnalyzerModel(AnythingBaseModel):
                         
                         # 流式输出执行结果
                         full_response = ""
-                        async for chunk in self.llm_manager.call_llm_stream(
+                        async for chunk in self.llm_manager.call_llm(
                             system_prompt=worker_system_prompt,
-                            user_prompt=execution_task_description
+                            user_prompt=execution_task_description,
+                            stream=True,
+                            stream_callback=callback
                         ):
                             full_response += chunk
                             await callback(chunk)
@@ -1177,9 +1179,11 @@ class LangChainAnalyzerModel(AnythingBaseModel):
                             
                             # 流式输出执行结果
                             full_response = ""
-                            async for chunk in self.llm_manager.call_llm_stream(
+                            async for chunk in self.llm_manager.call_llm(
                                 system_prompt=worker_system_prompt,
-                                user_prompt=execution_task_description
+                                user_prompt=execution_task_description,
+                                stream=True,
+                                stream_callback=state["callback"]
                             ):
                                 full_response += chunk
                                 await self._safe_callback(state["callback"], chunk)
