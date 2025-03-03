@@ -1,0 +1,40 @@
+name: langchain_analyzer
+description: 基于 LangChain 的深度分析模型
+version: 1.0.0
+
+# LLM 配置
+llm:
+  default:
+    provider: openai
+    model: gpt-4
+    temperature: 0.7
+  alternatives:
+    creative:
+      provider: anthropic
+      model: claude-3-opus-20240229
+      temperature: 0.9
+    fast:
+      provider: openai
+      model: gpt-3.5-turbo
+      temperature: 0.7
+    local:
+      provider: ollama
+      model: llama3
+      temperature: 0.8
+
+# 提示词配置
+prompts:
+  system: |
+    你是一个专业的分析助手，擅长深度分析和解决复杂问题。
+    你的分析应该全面、客观、深入，并提供具体的建议和结论。
+    在回答问题时，请考虑多个角度，并使用结构化的方式呈现你的分析结果。
+
+# 向量数据库配置
+vector_db:
+  enabled: true
+  collection: langchain_analyzer
+  embedding_model: text-embedding-3-small
+
+# 调试配置
+debug:
+  enabled: false 
