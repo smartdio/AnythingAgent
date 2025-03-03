@@ -22,6 +22,7 @@ from app.models.langchain_analyzer.templates import (
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.runnables import RunnableLambda
 
 logger = logging.getLogger(__name__)
 
@@ -1051,7 +1052,7 @@ class LangChainAnalyzerModel(AnythingBaseModel):
             # 定义节点函数
             
             # 1. 分析节点 - 分析用户输入，判断是否需要继续执行
-            async def analyzer(state: AnalyzerState) -> AnalyzerState:
+            async def analyzer_async(state: AnalyzerState) -> AnalyzerState:
                 """分析用户输入，判断是否需要继续执行"""
                 logger.info("执行分析节点")
                 
@@ -1080,8 +1081,11 @@ class LangChainAnalyzerModel(AnythingBaseModel):
                 logger.info(f"分析结果: {analysis_result[:100]}..." if len(analysis_result) > 100 else f"分析结果: {analysis_result}")
                 return state
             
+            # 使用RunnableLambda包装异步函数
+            analyzer = RunnableLambda(analyzer_async)
+            
             # 2. 规划节点 - 规划任务
-            async def planner(state: AnalyzerState) -> AnalyzerState:
+            async def planner_async(state: AnalyzerState) -> AnalyzerState:
                 """规划任务"""
                 logger.info("执行规划节点")
                 
@@ -1128,8 +1132,11 @@ class LangChainAnalyzerModel(AnythingBaseModel):
                 logger.info(f"任务数量: {len(state['tasks'])}")
                 return state
             
+            # 使用RunnableLambda包装异步函数
+            planner = RunnableLambda(planner_async)
+            
             # 3. 执行节点 - 执行任务
-            async def executor(state: AnalyzerState) -> AnalyzerState:
+            async def executor_async(state: AnalyzerState) -> AnalyzerState:
                 """执行任务"""
                 logger.info("执行任务节点")
                 
@@ -1206,8 +1213,11 @@ class LangChainAnalyzerModel(AnythingBaseModel):
                 
                 return state
             
+            # 使用RunnableLambda包装异步函数
+            executor = RunnableLambda(executor_async)
+            
             # 4. 直接回复节点 - 当分析结果不需要继续执行时，直接返回分析结果
-            async def direct_response(state: AnalyzerState) -> AnalyzerState:
+            async def direct_response_async(state: AnalyzerState) -> AnalyzerState:
                 """直接返回分析结果"""
                 logger.info("执行直接回复节点")
                 
@@ -1217,6 +1227,9 @@ class LangChainAnalyzerModel(AnythingBaseModel):
                     state["final_result"] = state["analysis_result"]
                 
                 return state
+            
+            # 使用RunnableLambda包装异步函数
+            direct_response = RunnableLambda(direct_response_async)
             
             # 添加节点到工作流
             workflow.add_node("analyzer", analyzer)
