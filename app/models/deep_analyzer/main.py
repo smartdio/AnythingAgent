@@ -8,6 +8,7 @@ from pathlib import Path
 from app.models.vector_model import VectorModel
 import datetime
 import re
+from app.models.llm_manager import LiteLLMManager
 from app.models.deep_analyzer.templates import (
     DEFAULT_ANALYZE_TASK_TEMPLATE,
     DEFAULT_PLANNING_TASK_TEMPLATE,
@@ -37,6 +38,12 @@ class DeepAnalyzerModel(VectorModel):
         
         # 加载模型特定配置
         self.config = self._load_config()
+        
+        # 初始化 LiteLLMManager
+        self.llm_manager = LiteLLMManager(
+            model_dir=self.model_dir,
+            config=self.config
+        )
         
         # 如果配置文件中有LLM配置，覆盖系统默认配置
         self._override_llm_config()
@@ -93,43 +100,13 @@ class DeepAnalyzerModel(VectorModel):
                 logger.info("配置文件中没有LLM配置，使用系统默认配置")
                 return
                 
-            # 只有当环境变量中没有设置时，才使用配置文件中的值
-            if not os.environ.get("LLM_PROVIDER") and "provider" in llm_config:
-                provider = llm_config.get("provider")
-                self.llm_config["provider"] = provider
-                logger.info(f"从配置文件覆盖LLM提供商: {provider}")
-                
-            if not os.environ.get("LLM_MODEL") and "model" in llm_config:
-                model = llm_config.get("model")
-                self.llm_config["model"] = model
-                logger.info(f"从配置文件覆盖LLM模型: {model}")
-                
-            if not os.environ.get("LLM_TEMPERATURE") and "temperature" in llm_config:
-                temperature = float(llm_config.get("temperature", 0.7))
-                self.llm_config["temperature"] = temperature
-                logger.info(f"从配置文件覆盖LLM温度: {temperature}")
-                
-            if not os.environ.get("LLM_API_KEY") and "api_key" in llm_config:
-                api_key = llm_config.get("api_key")
-                if api_key:  # 只有当配置文件中有非空值时才覆盖
-                    self.llm_config["api_key"] = api_key
-                    logger.info("从配置文件覆盖LLM API密钥")
-                
-            if not os.environ.get("LLM_API_BASE") and "api_base" in llm_config:
-                api_base = llm_config.get("api_base")
-                if api_base:  # 只有当配置文件中有非空值时才覆盖
-                    self.llm_config["api_base"] = api_base
-                    logger.info(f"从配置文件覆盖LLM API基础URL: {api_base}")
-                    
-            # 如果是Azure，处理额外配置
-            if self.llm_config["provider"] == "azure":
-                if not os.environ.get("AZURE_OPENAI_API_VERSION") and "api_version" in llm_config:
-                    self.llm_config["api_version"] = llm_config.get("api_version")
-                    
-                if not os.environ.get("AZURE_OPENAI_DEPLOYMENT") and "azure_deployment" in llm_config:
-                    self.llm_config["azure_deployment"] = llm_config.get("azure_deployment")
-                    
-            logger.info(f"最终LLM配置: {self.llm_config['provider']}/{self.llm_config['model']}")
+            # 重新初始化 LiteLLMManager
+            self.llm_manager = LiteLLMManager(
+                model_dir=self.model_dir,
+                config=self.config
+            )
+            
+            logger.info(f"已从配置文件加载LLM配置")
             
         except Exception as e:
             logger.error(f"覆盖LLM配置时出错: {str(e)}")
@@ -147,44 +124,21 @@ class DeepAnalyzerModel(VectorModel):
         try:
             # 如果是default，使用默认配置
             if llm_name == "default":
-                # 重新初始化LLM配置
-                super()._init_llm()
-                # 覆盖配置
-                self._override_llm_config()
-                logger.info(f"已切换到默认LLM配置: {self.llm_config['provider']}/{self.llm_config['model']}")
+                # 重新初始化 LiteLLMManager
+                self.llm_manager = LiteLLMManager(
+                    model_dir=self.model_dir,
+                    config=self.config
+                )
+                logger.info(f"已切换到默认LLM配置")
                 return True
             
-            # 从配置文件中获取备选LLM配置
-            alternatives = self.config.get("llm", {}).get("alternatives", {})
-            if llm_name not in alternatives:
-                logger.warning(f"未找到名为 {llm_name} 的LLM配置")
-                return False
-                
-            # 获取备选配置
-            alt_config = alternatives[llm_name]
-            
-            # 更新LLM配置
-            self.llm_config["provider"] = alt_config.get("provider", self.llm_config["provider"])
-            self.llm_config["model"] = alt_config.get("model", self.llm_config["model"])
-            self.llm_config["temperature"] = float(alt_config.get("temperature", self.llm_config["temperature"]))
-            
-            # 只有当配置中有非空值时才更新
-            if "api_key" in alt_config and alt_config["api_key"]:
-                self.llm_config["api_key"] = alt_config["api_key"]
-                
-            if "api_base" in alt_config and alt_config["api_base"]:
-                self.llm_config["api_base"] = alt_config["api_base"]
-                
-            # 如果是Azure，处理额外配置
-            if self.llm_config["provider"] == "azure":
-                if "api_version" in alt_config:
-                    self.llm_config["api_version"] = alt_config["api_version"]
-                    
-                if "azure_deployment" in alt_config:
-                    self.llm_config["azure_deployment"] = alt_config["azure_deployment"]
-            
-            logger.info(f"已切换到 {llm_name} LLM配置: {self.llm_config['provider']}/{self.llm_config['model']}")
-            return True
+            # 使用 LiteLLMManager 的 set_llm 方法
+            result = self.llm_manager.set_llm(llm_name)
+            if result:
+                logger.info(f"已切换到 {llm_name} LLM配置")
+            else:
+                logger.warning(f"切换到 {llm_name} LLM配置失败")
+            return result
             
         except Exception as e:
             logger.error(f"设置LLM配置时出错: {str(e)}")
@@ -246,46 +200,32 @@ class DeepAnalyzerModel(VectorModel):
         callback: Optional[Callable[[str], Awaitable[None]]] = None
     ) -> Optional[str]:
         """
-        处理聊天消息的主要方法
-
+        处理聊天消息
+        
         Args:
-            messages: 消息列表，每条消息是包含role和content的字典
-            callback: 用于流式输出的异步回调函数，如果为None则为非流式模式
-
+            messages: 消息列表，每个消息是包含角色和内容的字典
+            callback: 用于流式输出的异步回调函数
+            
         Returns:
             如果是非流式模式（callback=None），返回完整的响应字符串
             如果是流式模式（callback不为None），通过callback发送内容，返回None
         """
-        if not self.llm_config:
+        if not self.llm_manager:
             response = "LLM配置未初始化，无法使用Deep Analyzer模型。"
             await self._safe_callback(callback, response)
-            return None if callback else response
+            return response
+            
+        # 重新加载配置（如果配置文件已更改）
+        self._reload_config()
         
-        # 获取最后一条用户消息
-        user_message = None
-        for message in reversed(messages):
-            if message["role"] == "user":
-                user_message = message["content"]
-                break
+        # 提取最后一条用户消息
+        user_message = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
         
-        if not user_message:
-            response = "未找到用户消息。"
-            await self._safe_callback(callback, response)
-            return None if callback else response
+        # 提取最后一条系统消息（如果有）
+        system_message = next((m["content"] for m in reversed(messages) if m["role"] == "system"), "")
         
-        # 获取系统消息（如果有）
-        system_messages = [msg["content"] for msg in messages if msg["role"] == "system"]
-        system_message = "\n".join(system_messages) if system_messages else ""
-        
-        # 获取历史用户消息（最近10条）
-        history_messages = []
-        for msg in messages:
-            if msg["role"] == "user" or msg["role"] == "assistant":
-                history_messages.append(msg)
-        
-        # 只保留最近的10条消息（如果超过10条）
-        if len(history_messages) > 10:
-            history_messages = history_messages[-10:]
+        # 获取历史消息（最近10条，不包括最后一条用户消息）
+        history_messages = [m for m in messages[:-1]][-10:]
         
         # 使用LiteLLM处理消息
         result = await self._process_with_litellm(user_message, system_message, history_messages, callback)
@@ -366,7 +306,7 @@ class DeepAnalyzerModel(VectorModel):
         )
         
         # 打印要发送给LLM的信息
-        logger.info(f"分析阶段 - 发送给LLM的信息 - 模型: {self.llm_config['provider']}/{self.llm_config['model']}")
+        logger.info(f"分析阶段 - 发送给LLM的信息 - 模型: {self.llm_manager.llm_config.get('provider', 'unknown')}/{self.llm_manager.llm_config.get('model', 'unknown')}")
         logger.info(f"分析阶段 - 系统提示词: {analyzer_system_prompt}")
         logger.info(f"分析阶段 - 用户提示词: {analyze_task_description[:200]}..." if len(analyze_task_description) > 200 else f"分析阶段 - 用户提示词: {analyze_task_description}")
         
@@ -423,7 +363,7 @@ class DeepAnalyzerModel(VectorModel):
         )
         
         # 打印要发送给LLM的信息
-        logger.info(f"规划阶段 - 发送给LLM的信息 - 模型: {self.llm_config['provider']}/{self.llm_config['model']}")
+        logger.info(f"规划阶段 - 发送给LLM的信息 - 模型: {self.llm_manager.llm_config.get('provider', 'unknown')}/{self.llm_manager.llm_config.get('model', 'unknown')}")
         logger.info(f"规划阶段 - 系统提示词: {planner_system_prompt}")
         logger.info(f"规划阶段 - 用户提示词: {planning_task_description[:200]}..." if len(planning_task_description) > 200 else f"规划阶段 - 用户提示词: {planning_task_description}")
         
@@ -483,7 +423,7 @@ class DeepAnalyzerModel(VectorModel):
         )
         
         # 打印要发送给LLM的信息
-        logger.info(f"执行阶段 - 任务 {task_title} - 发送给LLM的信息 - 模型: {self.llm_config['provider']}/{self.llm_config['model']}")
+        logger.info(f"执行阶段 - 任务 {task_title} - 发送给LLM的信息 - 模型: {self.llm_manager.llm_config.get('provider', 'unknown')}/{self.llm_manager.llm_config.get('model', 'unknown')}")
         logger.info(f"执行阶段 - 任务 {task_title} - 系统提示词: {worker_system_prompt}")
         logger.info(f"执行阶段 - 任务 {task_title} - 用户提示词: {execution_task_description[:200]}..." if len(execution_task_description) > 200 else f"执行阶段 - 任务 {task_title} - 用户提示词: {execution_task_description}")
         
@@ -681,7 +621,7 @@ class DeepAnalyzerModel(VectorModel):
                 # 流式模式
                 try:
                     # 调用LiteLLM执行任务，使用流式输出和回调
-                    full_response = await self._call_llm(
+                    full_response = await self.llm_manager.call_llm(
                         system_prompt=worker_system_prompt,
                         user_prompt=execution_task_description,
                         stream=True,
@@ -707,7 +647,7 @@ class DeepAnalyzerModel(VectorModel):
                 # 非流式模式
                 try:
                     # 调用LiteLLM执行任务
-                    execution_result = await self._call_llm(
+                    execution_result = await self.llm_manager.call_llm(
                         system_prompt=worker_system_prompt,
                         user_prompt=execution_task_description
                     )
@@ -727,6 +667,21 @@ class DeepAnalyzerModel(VectorModel):
                     results.append(error_message)
         
         return results
+
+    async def _safe_callback(
+        self,
+        callback: Optional[Callable[[str], Awaitable[None]]],
+        content: str
+    ) -> None:
+        """
+        安全地调用回调函数，如果回调函数为空则忽略
+
+        Args:
+            callback: 回调函数，可能为None
+            content: 要发送的内容
+        """
+        if callback:
+            await callback(content)
 
     async def _process_with_litellm(
         self,
@@ -779,7 +734,7 @@ class DeepAnalyzerModel(VectorModel):
             )
             
             # 调用LiteLLM进行分析
-            analysis_result = await self._call_llm(
+            analysis_result = await self.llm_manager.call_llm(
                 system_prompt=analyzer_system_prompt,
                 user_prompt=analyze_task_description
             )
@@ -814,7 +769,7 @@ class DeepAnalyzerModel(VectorModel):
             )
             
             # 调用LiteLLM进行规划
-            planning_result = await self._call_llm(
+            planning_result = await self.llm_manager.call_llm(
                 system_prompt=planner_system_prompt,
                 user_prompt=planning_task_description
             )

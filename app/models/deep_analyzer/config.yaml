@@ -54,7 +54,7 @@ agent:
     backstory: "你是一个专业的任务执行专家，能够高效准确地完成各种任务。"
 
 # 任务模板
-task_templates:
+tasks:
   # 分析任务模板
   analyze_task:
     description: |

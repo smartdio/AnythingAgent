@@ -24,7 +24,6 @@ class ModelManager:
     
     _instance = None
     _models: Dict[str, Type[AnythingBaseModel]] = {}
-    _instances: Dict[str, AnythingBaseModel] = {}
     _model_configs: Dict[str, dict] = {}  # Store model configurations
     
     def __new__(cls):
@@ -39,7 +38,6 @@ class ModelManager:
         Load all models through auto-discovery mechanism.
         """
         self._models.clear()
-        self._instances.clear()
         self._model_configs.clear()
         self.discover_models()
         
@@ -225,8 +223,6 @@ class ModelManager:
             model_class: Model class.
         """
         self._models[name] = model_class
-        # Clear existing instance (if any)
-        self._instances.pop(name, None)
         logger.info(f"Registered model: {name}")
     
     def get_model(self, name: str) -> Optional[AnythingBaseModel]:
@@ -240,16 +236,16 @@ class ModelManager:
             Model instance, or None if model doesn't exist.
         """
         try:
-            # Create new instance if it doesn't exist
-            if name not in self._instances and name in self._models:
+            # Always create a new instance for each request to ensure independent state
+            if name in self._models:
                 model = self._models[name]()
                 # Set model directory
                 model.model_dir = Path(settings.MODELS_DIR) / name
                 # Set configuration to model instance if available
                 if name in self._model_configs:
                     model.config = self._model_configs[name]
-                self._instances[name] = model
-            return self._instances.get(name)
+                return model
+            return None
         except Exception as e:
             logger.error(f"Error creating model instance {name}: {str(e)}")
             return None
@@ -287,7 +283,7 @@ class ModelManager:
     def reload_models(self):
         """
         Reload all models.
-        This will clear all existing model instances.
+        This will reinitialize the model registry and configurations.
         """
         self._init_models()
         logger.info("All models reloaded")
