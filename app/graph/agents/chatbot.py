@@ -1,23 +1,27 @@
-from langgraph.graph import Command
+from langgraph.types import Command
 from langchain_core.language_models.chat_models import BaseChatModel
-from langgraph.graph import NEXT
 from app.graph.states.base_state import BaseState
-from app.graph.states.config import Config
 from typing import Callable, Awaitable
-from langchain_core.messages import HumanMessage
-def chatbot(name: str, task: str, llm: BaseChatModel, config: Config, callback: Callable[[str], Awaitable[None]]):
+from app.graph.agents.utils import HumanMessage, SystemMessage, AIMessage
+from typing import Dict
+def chatbot(name: str, agent:Dict[str,str], task: Dict[str,str], llm: BaseChatModel, callback: Callable[[str], Awaitable[None]]):
 
     async def chatbot_impl(state: BaseState) -> Command:
         print(f"Chatbot {name} is running")
-        messages = state.messages
-        response = llm.stream(messages)
+        messages = state['messages']
+        agent_description = agent.get('description')
+        sys_prompt = agent_description.format(message=state['message'])
+        system_message = SystemMessage(content=sys_prompt, name=name)
+        messages= messages + [system_message]
+        for message in messages:
+            print(f"{message['role']}: {message['content']} \n")
         result =''
-        for chunk in response:
+        async for chunk in llm.astream(messages):
             result += chunk.content
             if callback:
                 await callback(chunk.content)
-        return Command(goto=NEXT, update={"messages": [
-            HumanMessage(content=result, name=name)
-        ]})
+        print(f"chatbot result: {result} \n")
+        messages.append(AIMessage(content=result, name=name))
+        return Command(update={"messages": messages})
 
     return chatbot_impl

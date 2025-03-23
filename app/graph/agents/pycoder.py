@@ -12,10 +12,6 @@ from langgraph.prebuilt import create_react_agent
 from app.graph.agents.types import NEXT
 from app.graph.states.base_state import BaseState
 from app.graph.states.config import Config
-from app.graph.agents.utils import (
-    build_agent_prompt,
-)
-
 logger = logging.getLogger(__name__)
 
 
@@ -42,8 +38,6 @@ def python_repl_tool(
 def pycoder(config: Config,name:str,callback:Callable[[str], Awaitable[None]]):
     # 获取配置
     llm: Optional[BaseChatModel] = config.llm
-    agent_config = config.agents.get(name, {})
-    agent_prompt = build_agent_prompt(agent_config)
     
     # 创建ReAct Agent
     try:

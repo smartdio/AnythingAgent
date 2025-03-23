@@ -4,53 +4,48 @@ import json
 import asyncio
 import yaml
 import re
-from pathlib import Path
-from datetime import datetime
 
+from pathlib import Path
 from app.models.base import AnythingBaseModel
 from app.models.langchain_factory import LangChainLLMFactory
-from app.models.langchain_analyzer.state import AnalyzerState, AnalyzerConfig
-from app.models.langchain_analyzer.route import analyzer_route, worker_route
-from app.models.langchain_analyzer.analyzer import analyzer_node
-from app.models.langchain_analyzer.planner import planner_node
-from app.models.langchain_analyzer.worker import worker_node
-from app.models.langchain_analyzer.think import start_thinking_node, end_thinking_node
-from app.models.langchain_analyzer.message import message_node
 # 导入LangGraph相关模块
 from langgraph.graph import StateGraph, END, START
-from langchain.chat_models import init_chat_model
 from app.graph.states.config import Config
 from app.graph.states.base_state import BaseState
 from app.graph.agents.supervisor import supervisor
 from app.graph.agents.planner import planner
 from app.graph.agents.worker import worker
 from app.graph.agents.chatbot import chatbot
-from langgraph.types import Command
 logger = logging.getLogger(__name__)
 
-def worker_edge(state:Command)->Command:
+def worker_edge(state:BaseState):
+    if state['tasks'] and len(state['tasks']) > len(state['completed_tasks']):
+        return "worker"
+    else:
+        return END
 
     
-    return state['planner']
 
 
 class MultiAgentModel(AnythingBaseModel):
     def __init__(self):
         super().__init__()
-        self.config = Config()
-        self.config.load_config()
+        self.config_path = Path(__file__).parent / "config.yaml"
+        print(f"初始化配置，使用配置文件: {self.config_path}")
+        self.cfg = Config(self.config_path)
+        # self.config.load_config()
         
  
         
-        # 初始化LangGraph工作流
-    
-    
-    
-
-
-    def _init_workflow(self,callback:Callable[[str], Awaitable[None]]) -> None:
+    def _init_workflow(self,callback:Callable[[str], Awaitable[None]]):
         """Initialize the workflow."""
-        llm_config = self.config.config['llm']['default']
+
+        config = self.cfg.config
+        try:
+            llm_config = config['llm']['default']
+        except Exception as e:
+            logger.error(f"初始化配置时出错: {str(e)}")
+            return
         llm = LangChainLLMFactory.create_llm(provider=llm_config['provider'], 
                                              model=llm_config['model'], 
                                              temperature=llm_config['temperature'], 
@@ -58,17 +53,38 @@ class MultiAgentModel(AnythingBaseModel):
                                              api_base=llm_config['api_base'])
         workflow = StateGraph(BaseState)
         workflow.add_edge(START, 'supervisor')
-        workflow.add_node('supervisor', supervisor("supervisor","supervisor-task",llm, self.config,  ['planner', 'worker'],callback=callback))
-        workflow.add_node('planner', planner("planner","planner-task",llm, self.config,callback=callback))
-        workflow.add_node('worker', worker("worker","worker-task",llm, self.config,callback=callback))
-        workflow.add_node('chat',chatbot("chat",llm, self.config,callback=callback))
-        
-
-
+        agents = config['agents']
+        tasks = config['tasks']
+        workflow.add_node('supervisor', supervisor("supervisor",
+                                                   agents['supervisor'],
+                                                   tasks['supervisor-task'],
+                                                   llm,
+                                                   ['planner','worker','chat'], 
+                                                   callback=callback))
+        workflow.add_node('planner', planner("planner",
+                                             agents['planner'],
+                                             tasks['planner-task'],
+                                             llm, 
+                                             callback=callback))
+        workflow.add_node('worker', worker("worker",
+                                           agents['worker'],
+                                           tasks['worker-task'],
+                                           llm, 
+                                           callback=callback))
+        workflow.add_node('chat',chatbot("chat",
+                                         agents['chat'],
+                                         tasks['chat-task'],
+                                         llm, 
+                                         callback=callback))
+        workflow.add_edge('planner', 'worker')
+        workflow.add_edge('chat', END)
+        workflow.add_conditional_edges('worker', worker_edge )
+        graph = workflow.compile()
+        return graph
 
     
     async def on_chat_start(self) -> None:
-        
+        pass
         
     async def on_chat_messages(
         self,
@@ -76,7 +92,27 @@ class MultiAgentModel(AnythingBaseModel):
         callback: Optional[Callable[[str], Awaitable[None]]] = None
     ) -> Optional[str]:
         print("on_chat_messages")
+        # 使用 reload 方法检查配置是否需要重新加载
+        self.cfg.reload()
+        
+        state = BaseState()
+        state['messages'] = messages
+        state['config'] = self.cfg.config  # 传递配置字典，而不是 Config 对象
+        state['message'] = messages[-1]['content']
+        state['thinking'] = True
+        state['next'] = 'supervisor'
+        state['tasks'] = []
+        state['completed_tasks'] = []  # 初始化 completed_tasks 字段
+        state['members'] = ['supervisor','planner','worker','chat']
 
+        workflow = self._init_workflow(callback)
+        try:
+            result = await workflow.ainvoke(state)
+            return result
+        except Exception as e:
+            logger.error(f"执行工作流时出错: {str(e)}")
+            return f"执行工作流时出错: {str(e)}"
 
 
     async def on_chat_end(self) -> None:
+        pass

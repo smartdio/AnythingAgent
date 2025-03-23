@@ -17,7 +17,8 @@ class BaseState(TypedDict):
     """
     config: Dict[str, Any]          # 配置信息
     messages: List[Dict[str, str]]  # 消息历史
-    message: str                    # 当前消息
+    message: str                    # 当前消息, 用户输入的消息
+    prompt: str                     # 系统提示, 系统提示词
     thinking: bool                  # 是否在思考
     next: str                       # 下一个节点 
     tasks: List[Dict[str, Any]]     # 任务列表
@@ -26,13 +27,14 @@ class BaseState(TypedDict):
     #     "id": str,              # 任务唯一标识符
     #     "title": str,           # 任务标题
     #     "prompt": str,     # 任务详细描述
-    #     "status": str,          # 任务状态，如 "pending", "in_progress", "completed", "failed"
     # }
+    completed_tasks: List[Dict[str, Any]] # 已完成任务列表
     members: List[Dict[str, Any]]    # 成员列表
     # 成员字典结构示例:
     # {
     #     "name": str,           # 成员名称
-    #     "role": str,           # 成员角色
+    #     "role": str,   # 成员描述
+    #     "goal": str,           # 成员目标
     # }
 
 

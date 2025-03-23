@@ -5,71 +5,18 @@
 import logging
 import re
 from typing import Dict, Any, Tuple, List, Optional, Callable, Awaitable
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 logger = logging.getLogger(__name__)
 
 
+def SystemMessage(content: str, name: str = "system") :
+    return {"role": "system", "content": content, "name": name}
 
-def build_task_prompt(
-    task_config: Dict[str, Any],
-    **kwargs
-) -> str:
-    """
-    构建任务提示词。
-    
-    Args:
-        task_config: 任务配置
-        **kwargs: 用于格式化任务描述的参数
-    
-    Returns:
-        任务提示词
-    """
-    description = task_config.get("description", "")
-    
-    # 使用提供的参数格式化任务描述
-    try:
-        task_prompt = description.format(**kwargs)
-    except KeyError as e:
-        logger.warning(f"格式化任务描述时缺少参数: {e}")
-        task_prompt = description
-    
-    return task_prompt
+def HumanMessage(content: str, name: str = "user") :
+    return {"role": "user", "content": content, "name": name}
 
-
-def build_messages(
-    agent_prompt: str,
-    task_prompt: str,
-    history: Optional[List[Dict[str, str]]] = None
-) -> List[Dict[str, Any]]:
-    """
-    构建消息列表。
-    
-    Args:
-        agent_prompt: 智能体提示词
-        task_prompt: 任务提示词
-        history: 历史消息列表
-    
-    Returns:
-        消息列表
-    """
-    messages = [
-        SystemMessage(content=agent_prompt),
-        HumanMessage(content=task_prompt)
-    ]
-    
-    # 添加历史消息
-    if history:
-        for msg in history:
-            role = msg.get("role", "")
-            content = msg.get("content", "")
-            
-            if role == "user":
-                messages.append(HumanMessage(content=content))
-            elif role == "assistant":
-                messages.append(AIMessage(content=content))
-    
-    return messages
+def AIMessage(content: str, name: str = "assistant") :
+    return {"role": "assistant", "content": content, "name": name}
 
 
 async def stream_callback(

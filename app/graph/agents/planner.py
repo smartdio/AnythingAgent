@@ -1,17 +1,15 @@
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.types import Command
-from langchain_core.messages import HumanMessage, SystemMessage
 from typing import Callable, Awaitable, Optional
-from app.graph.agents.types import NEXT
 from app.graph.states.base_state import BaseState
-from app.graph.states.config import Config
-from app.graph.agents.utils import (
-    extract_json_from_text
-)
+from typing import TypedDict, List, Dict, Any
+from app.graph.agents.utils import HumanMessage, SystemMessage, AIMessage
+class Tasks(TypedDict):
+    """任务列表。"""
+    tasks: List[Dict[str, Any]]
 
-
-def planner(agent:str,role:str,task:str,llm:BaseChatModel,callback:Callable[[str], Awaitable[None]]):
+def planner(name:str,agent:Dict[str,str],task:Dict[str,str],llm:BaseChatModel,callback:Callable[[str], Awaitable[None]]):
     """
     创建规划智能体，负责规划任务。
     
@@ -27,18 +25,26 @@ def planner(agent:str,role:str,task:str,llm:BaseChatModel,callback:Callable[[str
         
     async def _planner_impl(state: BaseState) -> Command:
         print("start planner_agent")
-        agent_prompt = role.format(members=state.members)
-        task_prompt = task.format(message=state.message,members=state.members)
-        system_message = SystemMessage(content=agent_prompt, name=agent)
-        task_message = HumanMessage(content=task_prompt, name="user")
-        response = await llm.ainvoke([system_message,task_message])
-        json_content = response.content
-        json_obj = extract_json_from_text(json_content)
-
+        agent_description = agent.get('description')
+        agent_prompt = agent_description.format(message=state['message'])
+        task_description = task.get('description')
+        task_prompt = task_description.format(message=state['message'])
+        print(f"planner_agent prompt: {agent_prompt}")
+        print(f"planner_agent task_prompt: {task_prompt}")
+        system_message = SystemMessage(content=agent_prompt, name=name)
+        task_message = AIMessage(content=task_prompt, name="user")
+        response = await llm.with_structured_output(Tasks).ainvoke([system_message,task_message])
+        tasks_str = ""
+        for task_item in response['tasks']:
+            tasks_str += f"- {task_item['title']}\n"
+        print(f"tasks_str: {tasks_str}")
+        messages = state['messages']
+        messages.append(AIMessage(content=f"AI: 以下是任务列表：\n\n{tasks_str}", name=name))
         if callback:
-            await callback(json_content)
+            for task_item in response['tasks']:
+                await callback(f"- {task_item['title']}\n")
             await callback("\n\n")
-        return Command(goto=NEXT, update={"tasks": [json_obj],'completed_tasks':[],'next':NEXT})
+        return Command(update={"tasks": response['tasks'],'completed_tasks':[],'messages':messages})
     
     return _planner_impl
     
