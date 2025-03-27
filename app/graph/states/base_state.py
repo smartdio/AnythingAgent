@@ -17,6 +17,7 @@ class BaseState(TypedDict):
     """
     config: Dict[str, Any]          # 配置信息
     messages: List[Dict[str, str]]  # 消息历史
+    history: str                    # 消息历史，合并后的消息
     message: str                    # 当前消息, 用户输入的消息
     prompt: str                     # 系统提示, 系统提示词
     thinking: bool                  # 是否在思考

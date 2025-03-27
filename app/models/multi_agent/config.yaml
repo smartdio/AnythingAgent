@@ -1,0 +1,132 @@
+# Multi-Agent 模型配置
+model_info:
+  name: "Multi-Agent"
+  version: "0.1.0"
+  description: "基于Agent框架实现的高级分析模型，能够深入分析用户消息和系统消息，判断信息是否足够，并根据分析结果进行任务分解和执行。"
+
+# LLM配置
+llm:
+  # 默认LLM配置
+  default:
+    provider: "openai"  # 可选: openai, anthropic, ollama, azure, etc.
+    model: "qwq:latest"      # 模型名称
+    temperature: 0.5    # 温度参数
+    api_key: abcdefg # API密钥，留空则从环境变量读取
+    api_base: "http://211.137.102.69:58001/v1/"        # API基础URL，留空则从环境变量读取
+  
+  # 备选LLM配置
+  alternatives:
+    # Anthropic Claude配置
+    claude:
+      provider: "anthropic"
+      model: "claude-3-opus-20240229"
+      temperature: 0.5
+      api_key: ""
+      api_base: ""
+    # Ollama本地模型配置
+    ollama:
+      provider: "ollama"
+      model: "llama3"
+      base_url: "http://localhost:11434"
+      temperature: 0.8
+
+# agent配置
+agents:
+  # Analyzer Agent配置
+  supervisor:
+    role: "supervisor"
+    goal: "选择合适的Agent来执行任务"
+    description: |
+      你是主管，负责协调各个Agent的工作。
+      下面是Agent成员：{members}
+      - chat: 直接回答用户的问题
+      - planner: 根据用户的需求，深入分析，规划任务，然后交给worker来执行详细的回复。
+  
+  # Planner Agent配置
+  planner:
+    role: "planner"
+    goal: "用专业的视角，规划分析的纲要"
+    description: |
+      你是一个专业任务规划师，根据用户的需求，规划分析的纲要。
+  # Worker Agent配置
+  worker:
+    role: "worker"
+    goal: "执行具体任务任务的回复，并返回结果"
+    description: |
+      你是一个专业的任务执行者，根据规划师的纲要，执行具体任务的回复，并返回结果。
+  # Chat Agent配置
+  chat:
+    role: "chat"
+    goal: "回答用户的问题"
+    description: "你是一个专业的助理，回答用户各方面的问题。"
+
+# 任务模板
+tasks:
+  # 分析任务模板
+  supervisor-task:
+    description: |
+      HISTORY CONTEXT:
+      {history}
+      ---------------------------------------------------------------------------------
+      USER MESSAGE:
+      分析以下用户消息和系统消息，选择合适的Agent来执行回复：
+      {message}
+  # 规划任务模板
+  planner-task:
+    description: |
+      HISTORY CONTEXT:
+      {history}
+      ---------------------------------------------------------------------------------
+      USER MESSAGE:
+      根据以下用户提供的信息， 深入分析，规划分析的纲要，然后交给其他agent来对每个大纲任务执行详细的回复：
+      用户提供的信息：
+      {message}
+
+      请将分析和提供指导的纲要，分解为具体的子任务，并以JSON格式返回。每个任务必须包含title和prompt两个字段，例如：
+      
+      [
+         {{
+          "id": "任务ID1",
+          "title": "任务标题1",
+          "prompt": "任务描述1",
+          "status": "pending"
+        }},
+        {{
+          "id": "任务ID2",
+          "title": "任务标题2",
+          "prompt": "任务描述2",
+          "status": "pending"
+        }}
+      ]
+      
+      注意：每个任务必须同时包含id、title和prompt,status字段，否则将无法正确执行。
+  
+  # 执行任务模板
+  worker-task:
+    description: |
+      HISTORY CONTEXT:
+      {history}
+      ---------------------------------------------------------------------------------
+      USER MESSAGE:
+      用户提供的信息是：
+      {message}
+      ---------------------------------------------------------------------------------
+      按照计划，需要按以下纲要进行分析：
+      {tasks}
+      
+      目前已经完成以下分析：
+      {completed_tasks}
+      ---------------------------------------------------------------------------------
+      目前你需要执行以下主题分析并拟写评估意见：
+      
+      任务标题: {title}
+      任务描述: 
+      {prompt}
+
+  chat-task:
+    description: |
+      HISTORY CONTEXT:
+      {history}
+      ---------------------------------------------------------------------------------
+      USER MESSAGE:
+      {message}

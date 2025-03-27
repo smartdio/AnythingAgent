@@ -8,14 +8,35 @@ packages = [{include = "app"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-fastapi = "^0.109.0"
-uvicorn = "^0.27.0"
-pydantic = "^2.5.3"
-lancedb = "^0.5.3"
-python-multipart = "^0.0.9"
-python-dotenv = "^1.0.0"
+
+# 核心依赖
+fastapi = "^0.115.8"
+uvicorn = "^0.34.0"
+pydantic = "^2.10.6"
+pydantic-settings = "^2.2.1"
+python-dotenv = "^1.0.1"
+
+# 数据库相关
+sqlalchemy = "^2.0.30"
+alembic = "^1.13.1"
+lancedb = "^0.5.7"
+
+# 数据处理
+numpy = "^1.26.4"
+pandas = "^2.2.3"
+
+# 文件处理
+python-multipart = "^0.0.20"
 aiofiles = "^23.2.1"
-httpx = "^0.26.0"
+
+# 工具库
+tenacity = "^9.0.0"
+pyyaml = "^6.0.2"
+
+# AI 相关
+litellm = "^1.61.20"
+
+# Langchain 相关
 langchain-core = "^0.3.40"
 langchain = "^0.3.19"
 langchain-text-splitters = "^0.3.6"
@@ -32,13 +53,24 @@ langchain-redis = "^0.2.0"
 langchain-anthropic = "^0.3.8"
 langchain-groq = "^0.2.4"
 
+# LangGraph 相关
+langgraph = "^0.0.26"
+
 [tool.poetry.group.dev.dependencies]
-pytest = "^7.4.4"
-pytest-asyncio = "^0.23.3"
-black = "^24.1.1"
+# 测试工具
+pytest = "^8.3.3"
+pytest-asyncio = "^0.23.5"
+httpx = "^0.28.1"
+
+# 代码质量工具
+black = "^24.2.0"
 isort = "^5.13.2"
 flake8 = "^7.0.0"
 mypy = "^1.8.0"
+
+# 调试工具
+ipython = "^8.22.2"
+ipdb = "^0.13.13"
 
 [build-system]
 requires = ["poetry-core"]
@@ -52,7 +84,6 @@ include = '\.pyi?$'
 [tool.isort]
 profile = "black"
 multi_line_output = 3
-line_length = 88
 
 [tool.mypy]
 python_version = "3.10"

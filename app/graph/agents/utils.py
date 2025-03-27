@@ -67,3 +67,64 @@ def extract_json_from_text(text: str) -> Dict[str, Any]:
             return {}
     
     return {} 
+
+def extract_messages(messages: List[Dict[str, str]], limit: int = 30000) -> Tuple[str, str, str]:
+    """
+    从消息列表中提取关键消息并合并历史记录。
+    1. 提取最后一条系统提示词
+    2. 提取最后一条用户消息
+    3. 合并其余历史消息（不超过字数限制）
+    
+    Args:
+        messages: 消息历史记录列表，每条消息包含 role, content, name
+        limit: 合并后文本的最大字数限制，默认20000字
+        
+    Returns:
+        Tuple[str, str, str]: (
+            合并后的历史消息文本,
+            最后一条用户消息,
+            最后一条系统提示词
+        )
+    """
+    if not messages:
+        return "", "", ""
+        
+    history = []
+    current_length = 0
+    last_user_message = ""
+    last_system_message = ""
+    
+    # 先找到最后一条用户消息和系统消息
+    for msg in reversed(messages):
+        if msg["role"] == "user" and not last_user_message:
+            last_user_message = msg['content']
+        elif msg["role"] == "system" and not last_system_message:
+            last_system_message = msg['content']
+        if last_user_message and last_system_message:
+            break
+    
+    # 从最后一条消息开始处理历史消息（跳过最后一条用户消息）
+    found_last_user = False
+    for msg in reversed(messages):
+        # 跳过 system 消息
+        if msg["role"] == "system":
+            continue
+            
+        # 如果是最后一条用户消息，标记并跳过
+        if not found_last_user and msg["role"] == "user":
+            found_last_user = True
+            continue
+            
+        # 构建当前消息的格式化文本
+        role_name = msg.get("name", msg["role"])
+        formatted_msg = f"[{role_name}]: {msg['content']}\n"
+        
+        # 检查添加这条消息是否会超过限制
+        if current_length + len(formatted_msg) > limit:
+            print(f"history length: {current_length} + {len(formatted_msg)} > {limit}")
+            break
+            
+        history.insert(0, formatted_msg)  # 在开头插入消息，保持时间顺序
+        current_length += len(formatted_msg)
+    
+    return "".join(history), last_user_message.strip(), last_system_message.strip() 

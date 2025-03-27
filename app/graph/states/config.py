@@ -5,9 +5,8 @@
 import os
 import yaml
 import logging
-from typing import Dict, Any, Optional, Callable, Awaitable, Union, List
+from typing import Dict, Any, Optional, Union
 from pathlib import Path
-from langchain_core.language_models.chat_models import BaseChatModel
 
 logger = logging.getLogger(__name__)
 

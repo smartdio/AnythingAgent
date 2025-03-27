@@ -4,7 +4,7 @@ from langgraph.types import Command
 from typing import Callable, Awaitable, Optional
 from app.graph.states.base_state import BaseState
 from typing import TypedDict, List, Dict, Any
-from app.graph.agents.utils import HumanMessage, SystemMessage, AIMessage
+from app.graph.agents.utils import HumanMessage, SystemMessage, AIMessage, extract_messages
 class Tasks(TypedDict):
     """任务列表。"""
     tasks: List[Dict[str, Any]]
@@ -25,26 +25,22 @@ def planner(name:str,agent:Dict[str,str],task:Dict[str,str],llm:BaseChatModel,ca
         
     async def _planner_impl(state: BaseState) -> Command:
         print("start planner_agent")
+        history, last_user_message, last_system_message = extract_messages(state['messages'])
         agent_description = agent.get('description')
-        agent_prompt = agent_description.format(message=state['message'])
+        agent_prompt = agent_description.format(message=last_user_message, prompt=last_system_message)
         task_description = task.get('description')
-        task_prompt = task_description.format(message=state['message'])
-        print(f"planner_agent prompt: {agent_prompt}")
-        print(f"planner_agent task_prompt: {task_prompt}")
+        task_prompt = task_description.format(message=last_user_message, prompt=last_system_message, history=history)
         system_message = SystemMessage(content=agent_prompt, name=name)
         task_message = AIMessage(content=task_prompt, name="user")
         response = await llm.with_structured_output(Tasks).ainvoke([system_message,task_message])
         tasks_str = ""
         for task_item in response['tasks']:
             tasks_str += f"- {task_item['title']}\n"
-        print(f"tasks_str: {tasks_str}")
-        messages = state['messages']
-        messages.append(AIMessage(content=f"AI: 以下是任务列表：\n\n{tasks_str}", name=name))
         if callback:
             for task_item in response['tasks']:
                 await callback(f"- {task_item['title']}\n")
             await callback("\n\n")
-        return Command(update={"tasks": response['tasks'],'completed_tasks':[],'messages':messages})
+        return Command(update={"tasks": response['tasks'],'completed_tasks':[]})
     
     return _planner_impl
     

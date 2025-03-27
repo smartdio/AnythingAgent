@@ -9,7 +9,7 @@ from langgraph.types import Command
 from langgraph.graph import END
 from app.graph.agents.types import FINISH
 from app.graph.states.base_state import BaseState
-from app.graph.agents.utils import HumanMessage, SystemMessage
+from app.graph.agents.utils import HumanMessage, SystemMessage, extract_messages
 from typing import Literal
 
 logger = logging.getLogger(__name__)
@@ -40,20 +40,17 @@ def supervisor(name:str,agent:Dict[str,str],task:Dict[str,str],llm:BaseChatModel
     async def supervisor_impl(state: BaseState) -> Command:
         print(f"start {name} \n")
         # 构建提示词
+        history, last_user_message, last_system_message = extract_messages(state['messages'])
         agent_description = agent.get('description')
-        agent_prompt = agent_description.format(members=members,message=state['message'])
+        agent_prompt = agent_description.format(members=members,message=last_user_message, prompt=last_system_message)
         system_message = SystemMessage(content=agent_prompt, name=name)
-        user_message = HumanMessage(content=state['message'], name="user")
-        print(f"supervisor agent_prompt: {agent_prompt} \n")
-        messages = state['messages'].copy()
+        user_message = HumanMessage(content=f"CONTEXT: \n {history} \n\n USER MESSAGE: \n {last_user_message}", name="user")
 
-        messages = messages+[user_message]
-
-        response= await llm.with_structured_output(Router).ainvoke(messages+[system_message])
+        response= await llm.with_structured_output(Router).ainvoke([system_message, user_message])
         print(f"supervisor response: {response} \n")
         goto = response["next"]
         if goto not in options:
-            async for chunk in llm.astream(messages):
+            async for chunk in llm.astream([system_message, user_message]):
                 print(chunk.content)
                 if callback:
                     await callback(chunk.content)

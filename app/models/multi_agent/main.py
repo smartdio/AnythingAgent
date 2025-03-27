@@ -16,6 +16,7 @@ from app.graph.agents.supervisor import supervisor
 from app.graph.agents.planner import planner
 from app.graph.agents.worker import worker
 from app.graph.agents.chatbot import chatbot
+from app.graph.agents.utils import extract_messages
 logger = logging.getLogger(__name__)
 
 def worker_edge(state:BaseState):
@@ -94,11 +95,14 @@ class MultiAgentModel(AnythingBaseModel):
         print("on_chat_messages")
         # 使用 reload 方法检查配置是否需要重新加载
         self.cfg.reload()
-        
+        history, last_user_message, last_system_message = extract_messages(messages)
+
         state = BaseState()
         state['messages'] = messages
+        state['history'] = history
+        state['message'] = last_user_message
+        state['prompt'] = last_system_message
         state['config'] = self.cfg.config  # 传递配置字典，而不是 Config 对象
-        state['message'] = messages[-1]['content']
         state['thinking'] = True
         state['next'] = 'supervisor'
         state['tasks'] = []

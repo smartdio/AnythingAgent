@@ -7,7 +7,7 @@ from typing import Dict, Any, List, TypedDict, Optional, Callable, Awaitable
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.types import Command
 from app.graph.states.base_state import BaseState
-from app.graph.agents.utils import HumanMessage, SystemMessage, AIMessage
+from app.graph.agents.utils import HumanMessage, SystemMessage, AIMessage, extract_messages
 logger = logging.getLogger(__name__)
 
 
@@ -28,6 +28,7 @@ def worker(name:str,agent:Dict[str,str],task:Dict[str,str],llm:BaseChatModel,cal
     
     async def worker_impl(state: BaseState) -> Command:
         print("start worker_agent")
+        history, last_user_message, last_system_message = extract_messages(state['messages'])
         # 从状态中获取任务列表
         tasks = state['tasks']
         completed_tasks = state['completed_tasks']
@@ -53,11 +54,6 @@ def worker(name:str,agent:Dict[str,str],task:Dict[str,str],llm:BaseChatModel,cal
         for idx, task_item in enumerate(completed_tasks, 1):
             completed_task_list += f"- {idx}. {task_item.get('title', '未命名任务')}\n"
         
-        # 标记当前正在执行的任务
-        if current_task:
-            if callback:
-                await callback(f"正在执行任务: {current_task.get('title')}\n\n")
-        
         # 获取任务的prompt
         task_prompt = current_task.get('prompt', '')
 
@@ -67,11 +63,12 @@ def worker(name:str,agent:Dict[str,str],task:Dict[str,str],llm:BaseChatModel,cal
         sys_message = SystemMessage(content=agent_description.format(members=state['members']))
 
         task_description = task.get('description')
-        task_message = HumanMessage(content=task_description.format(message=state['message'],
+        task_message = HumanMessage(content=task_description.format(message=last_user_message,
                                                         tasks=task_list,
                                                         completed_tasks=completed_task_list,
                                                         title=current_task.get('title'),
-                                                        prompt=task_prompt,members=state['members']), 
+                                                        prompt=task_prompt,members=state['members'],
+                                                        history=history), 
                                                         name=name)
         # 复制 messages 给 send_message
         print(f"current_task: {current_task.get('title')}\n")
@@ -102,9 +99,7 @@ def worker(name:str,agent:Dict[str,str],task:Dict[str,str],llm:BaseChatModel,cal
         completed_tasks.append(current_task)
         
         # 更新状态中的completed_tasks
-        state['completed_tasks'] = completed_tasks
-        messages.append(AIMessage(content=responses, name=name))
-        return Command(update={"messages": messages,
+        return Command(update={
             "completed_tasks": completed_tasks,
             "thinking": False
             })

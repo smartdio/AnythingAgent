@@ -3,6 +3,6 @@
 """
 
 from app.graph.states.base_state import BaseState
-from app.graph.states.config import Config, ConfigLoader
+from app.graph.states.config import Config
 
-__all__ = ["BaseState", "Config", "ConfigLoader"] 
+__all__ = ["BaseState", "Config"] 
