@@ -77,7 +77,7 @@ def extract_messages(messages: List[Dict[str, str]], limit: int = 30000) -> Tupl
     
     Args:
         messages: 消息历史记录列表，每条消息包含 role, content, name
-        limit: 合并后文本的最大字数限制，默认20000字
+        limit: 合并后文本的最大字数限制，默认30000字
         
     Returns:
         Tuple[str, str, str]: (
@@ -96,10 +96,17 @@ def extract_messages(messages: List[Dict[str, str]], limit: int = 30000) -> Tupl
     
     # 先找到最后一条用户消息和系统消息
     for msg in reversed(messages):
+        content = msg.get('content', '')
+        # 确保 content 是字符串
+        if isinstance(content, (list, tuple)):
+            content = ' '.join(str(item) for item in content)
+        elif not isinstance(content, str):
+            content = str(content)
+            
         if msg["role"] == "user" and not last_user_message:
-            last_user_message = msg['content']
+            last_user_message = content
         elif msg["role"] == "system" and not last_system_message:
-            last_system_message = msg['content']
+            last_system_message = content
         if last_user_message and last_system_message:
             break
     
@@ -117,14 +124,25 @@ def extract_messages(messages: List[Dict[str, str]], limit: int = 30000) -> Tupl
             
         # 构建当前消息的格式化文本
         role_name = msg.get("name", msg["role"])
-        formatted_msg = f"[{role_name}]: {msg['content']}\n"
+        content = msg.get('content', '')
+        
+        # 确保 content 是字符串
+        if isinstance(content, (list, tuple)):
+            content = ' '.join(str(item) for item in content)
+        elif not isinstance(content, str):
+            content = str(content)
+            
+        formatted_msg = f"[{role_name}]: {content}\n"
         
         # 检查添加这条消息是否会超过限制
         if current_length + len(formatted_msg) > limit:
-            print(f"history length: {current_length} + {len(formatted_msg)} > {limit}")
+            logger.debug(f"历史消息长度将超过限制: {current_length} + {len(formatted_msg)} > {limit}")
             break
             
         history.insert(0, formatted_msg)  # 在开头插入消息，保持时间顺序
         current_length += len(formatted_msg)
     
-    return "".join(history), last_user_message.strip(), last_system_message.strip() 
+    # 确保返回的都是字符串类型
+    return ("".join(history),
+            str(last_user_message).strip(),
+            str(last_system_message).strip()) 
