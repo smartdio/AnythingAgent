@@ -3,7 +3,7 @@
 """
 
 from typing import TypedDict, List, Dict, Any, Optional
-
+from app.schemas.chat import Message
 
 class BaseState(TypedDict):
     """
@@ -16,9 +16,7 @@ class BaseState(TypedDict):
         next: 下一个节点的名称，用于路由控制
     """
     config: Dict[str, Any]          # 配置信息
-    messages: List[Dict[str, str]]  # 消息历史
-    history: str                    # 消息历史，合并后的消息
-    message: str                    # 当前消息, 用户输入的消息
+    messages: List[Any]  # 消息历史
     prompt: str                     # 系统提示, 系统提示词
     thinking: bool                  # 是否在思考
     next: str                       # 下一个节点 

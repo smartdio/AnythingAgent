@@ -7,7 +7,7 @@ import yaml
 import logging
 import datetime
 from dotenv import load_dotenv
-
+from app.schemas.chat import Message
 logger = logging.getLogger(__name__)
 
 class AnythingBaseModel(ABC):
@@ -19,6 +19,8 @@ class AnythingBaseModel(ABC):
     def __init__(self):
         # 加载环境变量
         load_dotenv()
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"init AnythingBaseModel at {current_time}")
         
         self.context = {}
         self.config = {}  # 模型配置
@@ -191,7 +193,7 @@ class AnythingBaseModel(ABC):
     @abstractmethod
     async def on_chat_messages(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Message],
         callback: Optional[Callable[[str], Awaitable[None]]] = None
     ) -> Optional[str]:
         """

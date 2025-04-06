@@ -25,14 +25,18 @@ def planner(name:str,agent:Dict[str,str],task:Dict[str,str],llm:BaseChatModel,ca
         
     async def _planner_impl(state: BaseState) -> Command:
         print("start planner_agent")
-        history, last_user_message, last_system_message = extract_messages(state['messages'])
+        messages = state['messages']
+        last_user_message = messages[-1].content
+
+        last_system_message = messages[0].content
         agent_description = agent.get('description')
         agent_prompt = agent_description.format(message=last_user_message, prompt=last_system_message)
         task_description = task.get('description')
-        task_prompt = task_description.format(message=last_user_message, prompt=last_system_message, history=history)
+        task_prompt = task_description.format(message=last_user_message, prompt=last_system_message)
         system_message = SystemMessage(content=agent_prompt, name=name)
         task_message = AIMessage(content=task_prompt, name="user")
-        response = await llm.with_structured_output(Tasks).ainvoke([system_message,task_message])
+        new_messages =  [system_message] + messages[1:-1] + [task_message]
+        response = await llm.with_structured_output(Tasks).ainvoke(new_messages)
         tasks_str = ""
         for task_item in response['tasks']:
             tasks_str += f"- {task_item['title']}\n"

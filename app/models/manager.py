@@ -11,8 +11,6 @@ from app.models.echo import EchoModel
 from app.models.context_aware import ContextAwareModel
 from app.core.config import settings
 from app.core.logger import get_logger
-from app.db.vector_store import vector_store
-from app.utils.vectorizer import vectorizer
 
 logger = get_logger("model_manager")
 
@@ -45,55 +43,6 @@ class ModelManager:
         if settings.DEFAULT_MODEL not in self._models:
             from app.models.context_aware import ContextAwareModel
             self.register_model(settings.DEFAULT_MODEL, ContextAwareModel)
-            
-        # 将所有模型描述添加到向量存储
-        # 注意：异步方法需要在异步上下文中调用，这里只是初始化
-        # 实际添加操作在reload_models方法中执行
-    
-    async def _add_models_to_vector_store(self):
-        """
-        将所有已注册模型的描述添加到向量存储
-        """
-        logger.info("Adding model descriptions to vector store")
-        for model_name, config in self._model_configs.items():
-            try:
-                # 检查配置中是否启用了向量存储
-                vector_store_config = config.get("vector_store", {})
-                
-                if not vector_store_config.get("enabled", True):
-                    logger.debug(f"Vector store disabled for model {model_name}, skipping")
-                    continue
-                
-                # 获取模型描述和元数据
-                model_info = config.get("model_info", {})
-                description = model_info.get("description", f"{model_name} 模型")
-                
-                metadata = vector_store_config.get("metadata", {
-                    "type": model_name,
-                    "capabilities": []
-                })
-                
-                # 生成模型ID
-                model_id = f"model-{model_name}"
-                
-                # 向量化描述
-                vector = vectorizer.encode(description)
-                
-                # 添加到向量存储
-                success = await vector_store.add_model_description(
-                    model_id,
-                    description,
-                    vector.tolist(),
-                    metadata
-                )
-                
-                if success:
-                    logger.info(f"Added model {model_name} description to vector store")
-                else:
-                    logger.warning(f"Failed to add model {model_name} description to vector store")
-                    
-            except Exception as e:
-                logger.error(f"Error adding model {model_name} to vector store: {str(e)}")
     
     def discover_models(self):
         """
@@ -265,21 +214,6 @@ class ModelManager:
             for name, model_class in self._models.items()
         }
     
-    def add_models_to_vector_store(self):
-        """
-        将所有模型描述添加到向量存储的同步方法，用于应用启动时调用
-        """
-        import asyncio
-        try:
-            # 在新的事件循环中运行异步任务
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(self._add_models_to_vector_store())
-            loop.close()
-            logger.info("Successfully added all model descriptions to vector store")
-        except Exception as e:
-            logger.error(f"Error adding model descriptions to vector store: {str(e)}")
-    
     def reload_models(self):
         """
         Reload all models.
@@ -287,10 +221,6 @@ class ModelManager:
         """
         self._init_models()
         logger.info("All models reloaded")
-        
-        # 重新添加模型描述到向量存储
-        self.add_models_to_vector_store()
-        logger.info("Model descriptions added to vector store")
 
 # Create global model manager instance
 model_manager = ModelManager() 

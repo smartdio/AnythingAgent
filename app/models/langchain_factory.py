@@ -112,7 +112,7 @@ class LangChainLLMFactory:
         provider: Literal["openai", "anthropic", "ollama"],
         model: str,
         temperature: float = 0.7,
-        api_key: str = "",
+        api_key: Optional[str] = None,
         api_base: Optional[str] = None,
         use_legacy: bool = False,
         **kwargs

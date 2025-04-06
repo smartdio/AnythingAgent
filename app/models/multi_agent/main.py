@@ -4,7 +4,7 @@ import json
 import asyncio
 import yaml
 import re
-
+import datetime
 from pathlib import Path
 from app.models.base import AnythingBaseModel
 from app.models.langchain_factory import LangChainLLMFactory
@@ -16,7 +16,7 @@ from app.graph.agents.supervisor import supervisor
 from app.graph.agents.planner import planner
 from app.graph.agents.worker import worker
 from app.graph.agents.chatbot import chatbot
-from app.graph.agents.utils import extract_messages
+from app.graph.agents.utils import convert_to_langchain_messages
 logger = logging.getLogger(__name__)
 
 def worker_edge(state:BaseState):
@@ -31,9 +31,10 @@ def worker_edge(state:BaseState):
 class MultiAgentModel(AnythingBaseModel):
     def __init__(self):
         super().__init__()
-        self.config_path = Path(__file__).parent / "config.yaml"
-        print(f"初始化配置，使用配置文件: {self.config_path}")
-        self.cfg = Config(self.config_path)
+        print(f"init MultiAgentModel at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        # self.config_path = Path(__file__).parent / "config.yaml"
+        # print(f"初始化配置，使用配置文件: {self.config_path}")
+        # self.cfg = Config(self.config_path)
         # self.config.load_config()
         
  
@@ -41,7 +42,7 @@ class MultiAgentModel(AnythingBaseModel):
     def _init_workflow(self,callback:Callable[[str], Awaitable[None]]):
         """Initialize the workflow."""
 
-        config = self.cfg.config
+        config = self.config
         try:
             llm_config = config['llm']['default']
         except Exception as e:
@@ -51,7 +52,8 @@ class MultiAgentModel(AnythingBaseModel):
                                              model=llm_config['model'], 
                                              temperature=llm_config['temperature'], 
                                              api_key=llm_config['api_key'], 
-                                             api_base=llm_config['api_base'])
+                                             api_base=llm_config['api_base'],
+                                             max_tokens=10000)
         workflow = StateGraph(BaseState)
         workflow.add_edge(START, 'supervisor')
         agents = config['agents']
@@ -89,20 +91,14 @@ class MultiAgentModel(AnythingBaseModel):
         
     async def on_chat_messages(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         callback: Optional[Callable[[str], Awaitable[None]]] = None
     ) -> Optional[str]:
         print("on_chat_messages")
-        # 使用 reload 方法检查配置是否需要重新加载
-        self.cfg.reload()
-        history, last_user_message, last_system_message = extract_messages(messages)
 
         state = BaseState()
-        state['messages'] = messages
-        state['history'] = history
-        state['message'] = last_user_message
-        state['prompt'] = last_system_message
-        state['config'] = self.cfg.config  # 传递配置字典，而不是 Config 对象
+        state['messages'] = convert_to_langchain_messages(messages)
+        state['config'] = self.config  # 传递配置字典，而不是 Config 对象
         state['thinking'] = True
         state['next'] = 'supervisor'
         state['tasks'] = []
@@ -114,6 +110,7 @@ class MultiAgentModel(AnythingBaseModel):
             result = await workflow.ainvoke(state)
             return result
         except Exception as e:
+            print(f"error: {str(e)}")
             logger.error(f"执行工作流时出错: {str(e)}")
             return f"执行工作流时出错: {str(e)}"
 

@@ -4,8 +4,8 @@
 
 import logging
 import re
-from typing import Dict, Any, Tuple, List, Optional, Callable, Awaitable
-
+from typing import Dict, Any, Tuple, List, Optional, Callable, Awaitable, Union
+from app.schemas.chat import Message
 logger = logging.getLogger(__name__)
 
 
@@ -68,7 +68,74 @@ def extract_json_from_text(text: str) -> Dict[str, Any]:
     
     return {} 
 
-def extract_messages(messages: List[Dict[str, str]], limit: int = 30000) -> Tuple[str, str, str]:
+
+def convert_to_langchain_messages(messages: List[Message]) -> List[Any]:
+    """
+    将app.schemas.chat中的Message列表转换为langchain中的Message列表。
+    
+    此函数支持以下转换:
+    - 系统消息 -> langchain_core.messages.SystemMessage
+    - 用户消息 -> langchain_core.messages.HumanMessage  
+    - 助手消息 -> langchain_core.messages.AIMessage
+    - 工具消息 -> langchain_core.messages.ToolMessage (如果角色为"tool")
+    
+    同时支持多模态内容转换:
+    - TextContent -> {"type": "text", "text": ...}
+    - ImageContent -> {"type": "image_url", "image_url": {"url": ...}}
+    
+    Args:
+        messages: app.schemas.chat.Message对象列表
+        
+    Returns:
+        langchain_core.messages中相应Message对象列表
+    """
+    from langchain_core.messages import (
+        AIMessage as LCAIMessage,
+        HumanMessage as LCHumanMessage,
+        SystemMessage as LCSystemMessage,
+        ToolMessage as LCToolMessage
+    )
+    
+    langchain_messages = []
+    
+    for msg in messages:
+        content = msg.content
+        name = msg.name
+        
+        # 处理多模态内容（将我们的格式转换为langchain支持的格式）
+        if isinstance(content, list):
+            # 将我们的TextContent和ImageContent对象转换为langchain支持的格式
+            lc_content = []
+            for item in content:
+                if item.type == "text":
+                    lc_content.append({"type": "text", "text": item.text})
+                elif item.type == "image":
+                    lc_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": item.image_url.url}
+                    })
+            content = lc_content
+        
+        # 根据角色创建不同类型的消息
+        if msg.role == "system":
+            langchain_messages.append(LCSystemMessage(content=content, name=name))
+        elif msg.role == "user":
+            langchain_messages.append(LCHumanMessage(content=content, name=name))
+        elif msg.role == "assistant":
+            langchain_messages.append(LCAIMessage(content=content, name=name))
+        elif msg.role == "tool":
+            # 对于工具消息，我们需要工具调用ID，默认为空字符串
+            # 如果需要支持真实的工具调用ID，可能需要在Message模型中添加相应字段
+            langchain_messages.append(LCToolMessage(content=content, tool_call_id="", name=name))
+        else:
+            # 对于未知角色，默认使用HumanMessage
+            logger.warning(f"未知消息角色: {msg.role}，将其视为用户消息")
+            langchain_messages.append(LCHumanMessage(content=content, name=name or msg.role))
+    
+    return langchain_messages
+
+
+def extract_messages(messages: List[Message], limit: int = 30000) -> Tuple[str, str, str]:
     """
     从消息列表中提取关键消息并合并历史记录。
     1. 提取最后一条系统提示词

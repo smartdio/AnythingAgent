@@ -86,7 +86,7 @@ async def create_chat_completion(
         # Process messages (non-streaming)
         logger.info("Using normal response mode")
         response_content = await model.on_chat_messages(
-            [msg.model_dump() for msg in chat_request.messages]
+            chat_request.messages
         )
 
         # Build response
@@ -165,7 +165,7 @@ async def _stream_chat_completion(
         logger.info("Starting model processing task")
         process_task = asyncio.create_task(
             model.on_chat_messages(
-                [msg.model_dump() for msg in request.messages],
+                request.messages,
                 callback=send_chunk
             )
         )

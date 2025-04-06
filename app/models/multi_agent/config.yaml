@@ -9,39 +9,48 @@ llm:
   # 默认LLM配置
   default:
     provider: "openai"  # 可选: openai, anthropic, ollama, azure, etc.
-    model: "qwq:latest"      # 模型名称
+    model: "qwq-32k"      # 模型名称
     temperature: 0.5    # 温度参数
     api_key: abcdefg # API密钥，留空则从环境变量读取
-    api_base: "http://211.137.102.69:58001/v1/"        # API基础URL，留空则从环境变量读取
+    api_base: "http://127.0.0.1:1234/v1/"        # API基础URL，留空则从环境变量读取
   
-  # 备选LLM配置
-  alternatives:
-    # Anthropic Claude配置
-    claude:
-      provider: "anthropic"
-      model: "claude-3-opus-20240229"
-      temperature: 0.5
-      api_key: ""
-      api_base: ""
-    # Ollama本地模型配置
-    ollama:
-      provider: "ollama"
-      model: "llama3"
-      base_url: "http://localhost:11434"
-      temperature: 0.8
+  local:
+    provider: "openai"
+    model: "qwq-32b"
+    temperature: 0.5
+    api_key: "abc"
+    api_base: "http://127.0.0.1:1234/v1"
+  # Ollama本地模型配置
+  ollama:
+    provider: "ollama"
+    model: "qwq:latest"
+    api_base: "http://211.137.102.69:58001"
+    api_key: "abc"
+    temperature: 0.5
 
 # agent配置
 agents:
   # Analyzer Agent配置
   supervisor:
     role: "supervisor"
-    goal: "选择合适的Agent来执行任务"
+    goal: "You are a world-class supervisor agent, who has great expertise in supervising tasks given by the user."
     description: |
-      你是主管，负责协调各个Agent的工作。
-      下面是Agent成员：{members}
-      - chat: 直接回答用户的问题
-      - planner: 根据用户的需求，深入分析，规划任务，然后交给worker来执行详细的回复。
-  
+      You are a world-class supervisor agent, who has great expertise in supervising tasks given by the user.
+      **Task:**  
+      You are tasked with managing a conversation between the following workers:  
+      {members}
+      
+      ### Objectives of the members:
+      - **chat**: This agent is responsible for general chat conversations. He is a universal agent; if you are unsure which agent to assign to respond, please designate chat to handle the reply.      - **tool_agent:** The tool agent is equipped with a set of tools designed to enhance the quality and accuracy of responses to user queries.
+      - **planner**: Conducts in-depth analysis of plans for the agent. When users require more detailed and meticulous analysis based on the information and needs provided, the planner performs a more thorough and细致的分析。
+      
+      ### Steps to be followed:
+      1. When you receive a task, your main responsibility is to analyze the task and the dialogue text to determine which agent should be called next based on the above member goals.
+      2. If you cannot decide which agent is suitable, let the `chat` agent respond.
+      
+      ### Important Instructions:
+      - At each step, carefully analyze and delegate the appropriate worker. Always double-check before assigning tasks.
+      - Once all subtasks have been completed and the overall task is addressed, ensure that the final response is structured and coherent
   # Planner Agent配置
   planner:
     role: "planner"
@@ -58,26 +67,17 @@ agents:
   chat:
     role: "chat"
     goal: "回答用户的问题"
-    description: "你是一个专业的助理，回答用户各方面的问题。"
+    description: "你是一个助理，回答用户各方面的问题。"
 
 # 任务模板
 tasks:
   # 分析任务模板
   supervisor-task:
     description: |
-      HISTORY CONTEXT:
-      {history}
-      ---------------------------------------------------------------------------------
-      USER MESSAGE:
-      分析以下用户消息和系统消息，选择合适的Agent来执行回复：
       {message}
   # 规划任务模板
   planner-task:
     description: |
-      HISTORY CONTEXT:
-      {history}
-      ---------------------------------------------------------------------------------
-      USER MESSAGE:
       根据以下用户提供的信息， 深入分析，规划分析的纲要，然后交给其他agent来对每个大纲任务执行详细的回复：
       用户提供的信息：
       {message}
@@ -104,10 +104,6 @@ tasks:
   # 执行任务模板
   worker-task:
     description: |
-      HISTORY CONTEXT:
-      {history}
-      ---------------------------------------------------------------------------------
-      USER MESSAGE:
       用户提供的信息是：
       {message}
       ---------------------------------------------------------------------------------

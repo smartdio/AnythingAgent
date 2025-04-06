@@ -40,21 +40,19 @@ def supervisor(name:str,agent:Dict[str,str],task:Dict[str,str],llm:BaseChatModel
     async def supervisor_impl(state: BaseState) -> Command:
         print(f"start {name} \n")
         # 构建提示词
-        history, last_user_message, last_system_message = extract_messages(state['messages'])
+        messages = state['messages']
+        last_system_message = messages[0].content
         agent_description = agent.get('description')
-        agent_prompt = agent_description.format(members=members,message=last_user_message, prompt=last_system_message)
+        agent_prompt = agent_description.format(members=members, prompt=last_system_message)
         system_message = SystemMessage(content=agent_prompt, name=name)
-        user_message = HumanMessage(content=f"CONTEXT: \n {history} \n\n USER MESSAGE: \n {last_user_message}", name="user")
+        
+        # 构建消息数组，将system_message和用户消息合并
+        new_messages = [system_message] + messages
 
-        response= await llm.with_structured_output(Router).ainvoke([system_message, user_message])
-        print(f"supervisor response: {response} \n")
+        response= await llm.with_structured_output(Router).ainvoke(new_messages)
         goto = response["next"]
         if goto not in options:
-            async for chunk in llm.astream([system_message, user_message]):
-                print(chunk.content)
-                if callback:
-                    await callback(chunk.content)
-            return Command(goto=END, update={"next": END})
+            goto = END
 
         if callback:
             if goto != FINISH:
