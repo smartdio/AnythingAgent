@@ -81,10 +81,6 @@ async def startup_event():
 
     # 确保模型目录存在
     os.makedirs(settings.MODELS_DIR, exist_ok=True)
-    
-    # 将所有模型描述添加到向量存储
-    model_manager.add_models_to_vector_store()
-    logger.info("Model descriptions added to vector store")
 
 @app.on_event("shutdown")
 async def shutdown_event():
