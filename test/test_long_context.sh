@@ -34,7 +34,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # 读取长上下文JSON文件
-LONG_CONTEXT_FILE="./data/long_context.json"
+LONG_CONTEXT_FILE="./data/long_context2.json"
 if [ ! -f "$LONG_CONTEXT_FILE" ]; then
   echo "错误: 找不到长上下文文件 $LONG_CONTEXT_FILE"
   exit 1
