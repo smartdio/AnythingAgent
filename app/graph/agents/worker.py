@@ -74,7 +74,7 @@ def worker(name:str,agent:Dict[str,str],task:Dict[str,str],llm:BaseChatModel,cal
         print(f"current_task: {current_task.get('title')}\n")
         print(f"task_message: {task_message}\n")
 
-        if state['thinking']:
+        if state['thinking'] and callback:
             await callback("</think>\n")
         responses = str()
         thinking =False

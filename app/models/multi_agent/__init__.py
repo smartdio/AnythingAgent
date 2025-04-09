@@ -1,3 +1,2 @@
-from app.models.langchain_analyzer.main import LangChainAnalyzerModel
-
+from .main import MultiAgentModel
 __all__ = ["MultiAgentModel"] 

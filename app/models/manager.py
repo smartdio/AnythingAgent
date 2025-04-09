@@ -190,9 +190,8 @@ class ModelManager:
                 model = self._models[name]()
                 # Set model directory
                 model.model_dir = Path(settings.MODELS_DIR) / name
-                # Set configuration to model instance if available
-                if name in self._model_configs:
-                    model.config = self._model_configs[name]
+                # 不再将缓存的配置直接传递给模型，让模型自己从文件中加载最新配置
+                # 这样保证每次都使用最新的配置文件
                 return model
             return None
         except Exception as e:
@@ -221,6 +220,47 @@ class ModelManager:
         """
         self._init_models()
         logger.info("All models reloaded")
+
+    def reload_model_config(self, name: str) -> bool:
+        """
+        重新加载指定模型的配置文件
+        
+        Args:
+            name: 模型名称
+            
+        Returns:
+            是否成功重新加载配置
+        """
+        try:
+            # 检查内置模型
+            app_models_dir = Path(__file__).parent
+            config_file = app_models_dir / name / "config.yaml"
+            
+            # 如果内置模型目录不存在配置文件，检查扩展模型
+            if not config_file.exists():
+                config_file = Path(settings.MODELS_DIR) / name / "config.yaml"
+            
+            # 如果找到配置文件，重新加载
+            if config_file.exists():
+                with open(config_file) as f:
+                    config = yaml.safe_load(f)
+                self._model_configs[name] = config
+                logger.info(f"重新加载模型配置: {name}")
+                return True
+            else:
+                logger.warning(f"找不到模型配置文件: {name}")
+                return False
+        except Exception as e:
+            logger.error(f"重新加载模型配置时出错 {name}: {str(e)}")
+            return False
+            
+    def reload_all_configs(self):
+        """
+        重新加载所有模型的配置文件
+        """
+        for name in self._models.keys():
+            self.reload_model_config(name)
+        logger.info("所有模型配置已重新加载")
 
 # Create global model manager instance
 model_manager = ModelManager() 

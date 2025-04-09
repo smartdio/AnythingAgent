@@ -14,6 +14,7 @@ class AnythingBaseModel(ABC):
     """
     AnythingBaseModel是所有模型的基类，定义了模型必须实现的接口。
     提供了基础的配置加载和环境隔离功能。
+    支持配置文件热更新，在初始化和方法调用时自动重新加载。
     """
     
     def __init__(self):
@@ -37,15 +38,37 @@ class AnythingBaseModel(ABC):
         self._setup_isolation()
     
     def _load_config(self):
-        """加载模型配置"""
+        """
+        加载模型配置
+        每次调用都重新从磁盘读取配置文件
+        """
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        print(f"[DEBUG] {current_time} - 加载配置文件 - 实例ID: {id(self)}")
+        
         if self.model_dir and (self.model_dir / "config.yaml").exists():
+            config_path = self.model_dir / "config.yaml"
+            print(f"[DEBUG] 找到配置文件: {config_path}")
+            
             try:
-                with open(self.model_dir / "config.yaml", 'r', encoding='utf-8') as f:
+                # 直接读取文件内容
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    old_config = self.config.copy() if self.config else {}
                     self.config = yaml.safe_load(f)
-                    logger.debug(f"为 {self.__class__.__name__} 加载配置: {self.config}")
+                    config_changed = old_config != self.config
+                    
+                    # 记录日志
+                    print(f"[DEBUG] 配置{'已更新' if config_changed else '未变化'}")
+                    if config_changed:
+                        logger.info(f"为 {self.__class__.__name__} 加载新配置")
+                        self._write_debug(f"配置文件更新: {self.config}")
             except Exception as e:
                 logger.error(f"加载配置文件时出错: {str(e)}")
-                self.config = {}
+                print(f"[DEBUG] 加载配置文件失败: {str(e)}")
+        else:
+            if not self.model_dir:
+                print(f"[DEBUG] 模型目录未设置")
+            else:
+                print(f"[DEBUG] 配置文件不存在: {self.model_dir / 'config.yaml'}")
     
     def _init_debug_file(self) -> None:
         """
@@ -165,17 +188,53 @@ class AnythingBaseModel(ABC):
     def model_dir(self) -> Optional[Path]:
         """Get model directory path"""
         if not self._model_dir:
-            # 获取模型类的模块文件路径
-            module_file = Path(sys.modules[self.__class__.__module__].__file__)
-            print(f"[DEBUG] Module file path: {module_file}")
-            
-            # 如果模块文件在 models 目录下，使用其所在目录作为模型目录
-            if "models" in module_file.parts:
-                models_index = module_file.parts.index("models")
-                self._model_dir = Path(*module_file.parts[:models_index+2])
-                self._model_dir = self._model_dir.resolve()  # 获取绝对路径
-                print(f"[DEBUG] Inferred model directory: {self._model_dir}")
+            try:
+                # 获取模型类的模块文件路径
+                class_module = self.__class__.__module__
+                print(f"[DEBUG] 当前类 {self.__class__.__name__} 的模块: {class_module}")
                 
+                if class_module not in sys.modules:
+                    print(f"[DEBUG] 错误: 模块 {class_module} 不在 sys.modules 中")
+                    print(f"[DEBUG] 可用模块: {list(sys.modules.keys())[:20]}...")  # 只打印前20个避免信息过多
+                    return None
+                
+                module_file = Path(sys.modules[class_module].__file__)
+                print(f"[DEBUG] 模块文件路径: {module_file}")
+                
+                # 如果模块文件在 models 目录下，使用其所在目录作为模型目录
+                if "models" in module_file.parts:
+                    models_index = module_file.parts.index("models")
+                    # 修改目录获取方式，确保获取到子类所在的具体模型目录
+                    self._model_dir = Path(*module_file.parts[:models_index+2])
+                    
+                    # 特殊处理：如果是多级结构如 models/agent_type/agent_name
+                    # 这里假设子类的实现文件放在其专属目录下
+                    module_dir = module_file.parent
+                    if module_dir.name != self._model_dir.name:
+                        # 如果模块所在目录名与models下一级目录名不同
+                        # 可能是更深层次的结构，使用模块所在目录
+                        self._model_dir = module_dir
+                    
+                    self._model_dir = self._model_dir.resolve()  # 获取绝对路径
+                    print(f"[DEBUG] 推断的模型目录: {self._model_dir}")
+                    
+                    # 检查推断的目录中是否存在配置文件
+                    if not (self._model_dir / "config.yaml").exists():
+                        print(f"[DEBUG] 警告: 推断的目录中没有找到 config.yaml 文件")
+                        
+                        # 尝试查找更接近实际实现的目录
+                        parent_dir = module_file.parent
+                        if (parent_dir / "config.yaml").exists():
+                            self._model_dir = parent_dir
+                            print(f"[DEBUG] 使用替代模型目录: {self._model_dir}")
+                else:
+                    print(f"[DEBUG] 警告: 模块文件路径中没有 'models' 目录")
+            except Exception as e:
+                print(f"[DEBUG] 获取模型目录时出错: {str(e)}")
+                import traceback
+                print(f"[DEBUG] 错误详情: {traceback.format_exc()}")
+                return None
+        
         return self._model_dir
     
     @model_dir.setter
@@ -209,24 +268,32 @@ class AnythingBaseModel(ABC):
             If non-streaming mode (callback=None), returns complete response string
             If streaming mode (callback not None), returns None, content sent through callback
         """
+        # 在处理消息前重新加载配置
+        self._load_config()
         pass
 
     async def on_chat_start(self) -> None:
         """
         Hook method called when chat starts.
         """
+        # 在聊天开始前重新加载配置
+        self._load_config()
         pass
 
     async def on_chat_end(self) -> None:
         """
         Hook method called when chat ends.
         """
+        # 在聊天结束前重新加载配置
+        self._load_config()
         pass
 
     async def on_chat_stop(self) -> None:
         """
         Hook method called when chat stops.
         """
+        # 在聊天停止前重新加载配置
+        self._load_config()
         pass
 
     async def on_chat_resume(self, thread: str) -> None:
@@ -236,6 +303,8 @@ class AnythingBaseModel(ABC):
         Args:
             thread: Chat thread identifier.
         """
+        # 在聊天恢复前重新加载配置
+        self._load_config()
         pass
 
     def set_context(self, key: str, value: Any) -> None:

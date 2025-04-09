@@ -22,7 +22,6 @@ def reader(config: Config,name:str,task:str,callback:Callable[[str], Awaitable[N
     # 获取配置
     llm: Optional[BaseChatModel] = config.llm
     agent_config = config.agents.get(name, {})
-    agent_prompt = build_agent_prompt(agent_config)
 
     async def _reader_impl(state: BaseState) -> Command:
         print("start reader_agent")

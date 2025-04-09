@@ -48,6 +48,7 @@ class MultiAgentModel(AnythingBaseModel):
         except Exception as e:
             logger.error(f"初始化配置时出错: {str(e)}")
             return
+        logger.info(f"初始化LLM配置: {llm_config}")
         llm = LangChainLLMFactory.create_llm(provider=llm_config['provider'], 
                                              model=llm_config['model'], 
                                              temperature=llm_config['temperature'], 
@@ -86,8 +87,6 @@ class MultiAgentModel(AnythingBaseModel):
         return graph
 
     
-    async def on_chat_start(self) -> None:
-        pass
         
     async def on_chat_messages(
         self,
