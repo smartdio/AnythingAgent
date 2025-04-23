@@ -55,8 +55,7 @@ def supervisor(name:str,agent:Dict[str,str],task:Dict[str,str],llm:BaseChatModel
             goto = END
 
         if callback:
-            if goto != FINISH:
-                await callback("<think>\n")
+            await callback("thinking...\n",True)
         if goto == FINISH:
             goto = END
 

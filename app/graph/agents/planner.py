@@ -5,6 +5,8 @@ from typing import Callable, Awaitable, Optional
 from app.graph.states.base_state import BaseState
 from typing import TypedDict, List, Dict, Any
 from app.graph.agents.utils import HumanMessage, SystemMessage, AIMessage, extract_messages
+import logging
+logger = logging.getLogger(__name__)
 class Tasks(TypedDict):
     """任务列表。"""
     tasks: List[Dict[str, Any]]
@@ -37,14 +39,16 @@ def planner(name:str,agent:Dict[str,str],task:Dict[str,str],llm:BaseChatModel,ca
         task_message = AIMessage(content=task_prompt, name="user")
         new_messages =  [system_message] + messages[1:-1] + [task_message]
         response = await llm.with_structured_output(Tasks).ainvoke(new_messages)
+        print(f"resopnse type: {type(response)}")
+        print(f"response: {response}")
         tasks_str = ""
-        for task_item in response['tasks']:
+        for task_item in response:
             tasks_str += f"- {task_item['title']}\n"
         if callback:
-            for task_item in response['tasks']:
-                await callback(f"- {task_item['title']}\n")
-            await callback("\n\n")
-        return Command(update={"tasks": response['tasks'],'completed_tasks':[]})
+            for task_item in response:
+                await callback(f"- {task_item['title']}\n",True)
+            await callback("\n\n",True)
+        return Command(update={"tasks": response,'completed_tasks':[]})
     
     return _planner_impl
     

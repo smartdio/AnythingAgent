@@ -156,26 +156,51 @@ async def _stream_chat_completion(
         yield f"data: {start_response.model_dump_json()}\n\n"
         logger.info("Role message sent")
 
-        async def send_chunk(content: str):
+        async def send_chunk(content: str, is_reasoning: bool = False):
             """Callback function for sending streaming content"""
-            logger.debug(f"Received model generated content: {content}")
-            await response_queue.put(content)
+            logger.debug(f"Received model generated content: {'reasoning' if is_reasoning else 'content'}: {content}")
+            await response_queue.put((content, is_reasoning))
 
         # Start model's streaming process
         logger.info("Starting model processing task")
-        process_task = asyncio.create_task(
-            model.on_chat_messages(
-                request.messages,
-                callback=send_chunk
+        try:
+            process_task = asyncio.create_task(
+                model.on_chat_messages(
+                    request.messages,
+                    callback=send_chunk
+                )
             )
-        )
+        except TypeError as e:
+            # 处理旧版模型不支持 is_reasoning 参数的情况
+            logger.warning(f"Model doesn't support reasoning_content parameter: {str(e)}")
+            # 定义向后兼容的回调函数
+            async def backwards_compatible_callback(content: str):
+                await send_chunk(content, False)  # 默认为非推理内容
+            
+            process_task = asyncio.create_task(
+                model.on_chat_messages(
+                    request.messages,
+                    callback=backwards_compatible_callback
+                )
+            )
         
         # Continuously get and send responses from queue
         chunk_count = 0
         while not process_task.done() or not response_queue.empty():
             try:
-                content = await asyncio.wait_for(response_queue.get(), timeout=0.5)
+                # Get content and type (reasoning or normal content)
+                content_data = await asyncio.wait_for(response_queue.get(), timeout=0.5)
+                
+                # Check if it's a tuple (new format) or just a string (old format for backward compatibility)
+                if isinstance(content_data, tuple):
+                    content, is_reasoning = content_data
+                else:
+                    content, is_reasoning = content_data, False
+                    
                 chunk_count += 1
+                
+                # Create delta based on content type
+                delta = {"reasoning_content": content} if is_reasoning else {"content": content}
                 
                 # Build streaming response
                 response = ChatCompletionStreamResponse(
@@ -185,7 +210,7 @@ async def _stream_chat_completion(
                     choices=[
                         StreamChoice(
                             index=0,
-                            delta={"content": content},
+                            delta=delta,
                             finish_reason=None
                         )
                     ]

@@ -74,27 +74,18 @@ def worker(name:str,agent:Dict[str,str],task:Dict[str,str],llm:BaseChatModel,cal
         print(f"current_task: {current_task.get('title')}\n")
         print(f"task_message: {task_message}\n")
 
-        if state['thinking'] and callback:
-            await callback("</think>\n")
         responses = str()
-        thinking =False
-        after_think= False
         new_messages = [sys_message]+messages[0:-1]+[task_message]
         async for chunk in llm.astream(new_messages):
             # 检查是否包含思考标签
+            if callback:
+                if chunk.content:
+                    await callback(chunk.content)
             responses += chunk.content
-            chunk_content = chunk.content
-            if "<think>" in chunk_content:
-                 thinking = True
-            if "</think>" in chunk_content and thinking:
-                thinking =False
-                after_think=True
-                chunk_content = chunk.content.replace("</think>", "")
-            if after_think and callback:
-                await callback(chunk_content)
+
+        print(f"responses: {responses}")
         if callback:
             await callback("\n\n")
-        print(f"responses: {responses}")
         # 将当前任务标记为已完成并添加到completed_tasks列表中
         current_task['status'] = 'completed'
         completed_tasks.append(current_task)

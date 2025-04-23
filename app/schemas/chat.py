@@ -56,7 +56,7 @@ class ChatCompletionResponse(BaseModel):
 class StreamChoice(BaseModel):
     """Stream response choice model"""
     index: int = Field(..., description="Choice index")
-    delta: Dict[str, str] = Field(..., description="Incremental content")
+    delta: Dict[str, Optional[str]] = Field(..., description="Incremental content, can contain 'content', 'role', or 'reasoning_content'")
     finish_reason: Optional[str] = Field(None, description="Reason for completion")
 
 class ChatCompletionStreamResponse(BaseModel):

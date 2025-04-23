@@ -253,7 +253,7 @@ class AnythingBaseModel(ABC):
     async def on_chat_messages(
         self,
         messages: List[Message],
-        callback: Optional[Callable[[str], Awaitable[None]]] = None
+        callback: Optional[Callable[[str, bool], Awaitable[None]]] = None
     ) -> Optional[str]:
         """
         Core method for processing chat messages.
@@ -263,6 +263,8 @@ class AnythingBaseModel(ABC):
         Args:
             messages: List of messages, each message is a dictionary containing role and content
             callback: Async callback function for streaming output. If None, non-streaming mode
+                      The callback takes two parameters: content (str) and is_reasoning (bool)
+                      is_reasoning=True indicates this is reasoning content, not final answer
 
         Returns:
             If non-streaming mode (callback=None), returns complete response string
