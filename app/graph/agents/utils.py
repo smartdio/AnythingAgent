@@ -8,7 +8,6 @@ from typing import Dict, Any, Tuple, List, Optional, Callable, Awaitable, Union
 from app.schemas.chat import Message
 logger = logging.getLogger(__name__)
 
-
 def SystemMessage(content: str, name: str = "system") :
     return {"role": "system", "content": content, "name": name}
 
