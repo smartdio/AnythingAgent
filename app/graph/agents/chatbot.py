@@ -14,13 +14,17 @@ def chatbot(name: str, agent:Dict[str,str], task: Dict[str,str], llm: BaseChatMo
         messages = state["messages"]
         new_messages = [system_message] + messages
         result = ""
-        async for chunk in llm.astream(new_messages):
-            if callback:
+
+        if callback:
+            async for chunk in llm.astream(messages):
                 if chunk.content:
                     await callback(chunk.content)
+                    result += chunk.content
                 # else:
                 #     await callback(chunk.reasoning_content)
-            result += chunk.content
+        else:
+            print("no callback")
+            result = await llm.invoke(new_messages)
         print(f"chatbot result: {result} \n")
         messages.append(AIMessage(content=result, name=name))
         return Command(update={"messages": messages})
