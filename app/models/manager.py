@@ -11,8 +11,6 @@ from app.models.echo import EchoModel
 from app.models.context_aware import ContextAwareModel
 from app.core.config import settings
 from app.core.logger import get_logger
-from app.db.vector_store import vector_store
-from app.utils.vectorizer import vectorizer
 
 logger = get_logger("model_manager")
 
@@ -24,7 +22,6 @@ class ModelManager:
     
     _instance = None
     _models: Dict[str, Type[AnythingBaseModel]] = {}
-    _instances: Dict[str, AnythingBaseModel] = {}
     _model_configs: Dict[str, dict] = {}  # Store model configurations
     
     def __new__(cls):
@@ -39,7 +36,6 @@ class ModelManager:
         Load all models through auto-discovery mechanism.
         """
         self._models.clear()
-        self._instances.clear()
         self._model_configs.clear()
         self.discover_models()
         
@@ -47,55 +43,6 @@ class ModelManager:
         if settings.DEFAULT_MODEL not in self._models:
             from app.models.context_aware import ContextAwareModel
             self.register_model(settings.DEFAULT_MODEL, ContextAwareModel)
-            
-        # 将所有模型描述添加到向量存储
-        # 注意：异步方法需要在异步上下文中调用，这里只是初始化
-        # 实际添加操作在reload_models方法中执行
-    
-    async def _add_models_to_vector_store(self):
-        """
-        将所有已注册模型的描述添加到向量存储
-        """
-        logger.info("Adding model descriptions to vector store")
-        for model_name, config in self._model_configs.items():
-            try:
-                # 检查配置中是否启用了向量存储
-                vector_store_config = config.get("vector_store", {})
-                
-                if not vector_store_config.get("enabled", True):
-                    logger.debug(f"Vector store disabled for model {model_name}, skipping")
-                    continue
-                
-                # 获取模型描述和元数据
-                model_info = config.get("model_info", {})
-                description = model_info.get("description", f"{model_name} 模型")
-                
-                metadata = vector_store_config.get("metadata", {
-                    "type": model_name,
-                    "capabilities": []
-                })
-                
-                # 生成模型ID
-                model_id = f"model-{model_name}"
-                
-                # 向量化描述
-                vector = vectorizer.encode(description)
-                
-                # 添加到向量存储
-                success = await vector_store.add_model_description(
-                    model_id,
-                    description,
-                    vector.tolist(),
-                    metadata
-                )
-                
-                if success:
-                    logger.info(f"Added model {model_name} description to vector store")
-                else:
-                    logger.warning(f"Failed to add model {model_name} description to vector store")
-                    
-            except Exception as e:
-                logger.error(f"Error adding model {model_name} to vector store: {str(e)}")
     
     def discover_models(self):
         """
@@ -225,8 +172,6 @@ class ModelManager:
             model_class: Model class.
         """
         self._models[name] = model_class
-        # Clear existing instance (if any)
-        self._instances.pop(name, None)
         logger.info(f"Registered model: {name}")
     
     def get_model(self, name: str) -> Optional[AnythingBaseModel]:
@@ -240,16 +185,15 @@ class ModelManager:
             Model instance, or None if model doesn't exist.
         """
         try:
-            # Create new instance if it doesn't exist
-            if name not in self._instances and name in self._models:
+            # Always create a new instance for each request to ensure independent state
+            if name in self._models:
                 model = self._models[name]()
                 # Set model directory
                 model.model_dir = Path(settings.MODELS_DIR) / name
-                # Set configuration to model instance if available
-                if name in self._model_configs:
-                    model.config = self._model_configs[name]
-                self._instances[name] = model
-            return self._instances.get(name)
+                # 不再将缓存的配置直接传递给模型，让模型自己从文件中加载最新配置
+                # 这样保证每次都使用最新的配置文件
+                return model
+            return None
         except Exception as e:
             logger.error(f"Error creating model instance {name}: {str(e)}")
             return None
@@ -269,32 +213,54 @@ class ModelManager:
             for name, model_class in self._models.items()
         }
     
-    def add_models_to_vector_store(self):
-        """
-        将所有模型描述添加到向量存储的同步方法，用于应用启动时调用
-        """
-        import asyncio
-        try:
-            # 在新的事件循环中运行异步任务
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(self._add_models_to_vector_store())
-            loop.close()
-            logger.info("Successfully added all model descriptions to vector store")
-        except Exception as e:
-            logger.error(f"Error adding model descriptions to vector store: {str(e)}")
-    
     def reload_models(self):
         """
         Reload all models.
-        This will clear all existing model instances.
+        This will reinitialize the model registry and configurations.
         """
         self._init_models()
         logger.info("All models reloaded")
+
+    def reload_model_config(self, name: str) -> bool:
+        """
+        重新加载指定模型的配置文件
         
-        # 重新添加模型描述到向量存储
-        self.add_models_to_vector_store()
-        logger.info("Model descriptions added to vector store")
+        Args:
+            name: 模型名称
+            
+        Returns:
+            是否成功重新加载配置
+        """
+        try:
+            # 检查内置模型
+            app_models_dir = Path(__file__).parent
+            config_file = app_models_dir / name / "config.yaml"
+            
+            # 如果内置模型目录不存在配置文件，检查扩展模型
+            if not config_file.exists():
+                config_file = Path(settings.MODELS_DIR) / name / "config.yaml"
+            
+            # 如果找到配置文件，重新加载
+            if config_file.exists():
+                with open(config_file) as f:
+                    config = yaml.safe_load(f)
+                self._model_configs[name] = config
+                logger.info(f"重新加载模型配置: {name}")
+                return True
+            else:
+                logger.warning(f"找不到模型配置文件: {name}")
+                return False
+        except Exception as e:
+            logger.error(f"重新加载模型配置时出错 {name}: {str(e)}")
+            return False
+            
+    def reload_all_configs(self):
+        """
+        重新加载所有模型的配置文件
+        """
+        for name in self._models.keys():
+            self.reload_model_config(name)
+        logger.info("所有模型配置已重新加载")
 
 # Create global model manager instance
 model_manager = ModelManager() 

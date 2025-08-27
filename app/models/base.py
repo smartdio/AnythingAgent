@@ -5,40 +5,31 @@ import os
 import sys
 import yaml
 import logging
-import json
 import datetime
 from dotenv import load_dotenv
-
-# 尝试导入litellm，如果不存在则设置为None
-try:
-    import litellm
-    LITELLM_AVAILABLE = True
-except ImportError:
-    LITELLM_AVAILABLE = False
-
+from app.schemas.chat import Message
 logger = logging.getLogger(__name__)
 
 class AnythingBaseModel(ABC):
     """
     AnythingBaseModel是所有模型的基类，定义了模型必须实现的接口。
-    提供了基础的LLM管理功能，包括配置加载、环境变量处理和LLM调用。
+    提供了基础的配置加载和环境隔离功能。
+    支持配置文件热更新，在初始化和方法调用时自动重新加载。
     """
     
     def __init__(self):
         # 加载环境变量
         load_dotenv()
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"init AnythingBaseModel at {current_time}")
         
         self.context = {}
         self.config = {}  # 模型配置
         self._model_dir = None  # 模型目录路径
-        self.llm_config = None  # LLM配置
         self.debug_file = None  # 调试文件
         
         # 加载配置
         self._load_config()
-        
-        # 初始化LLM配置
-        self._init_llm()
         
         # 初始化调试文件
         self._init_debug_file()
@@ -47,77 +38,37 @@ class AnythingBaseModel(ABC):
         self._setup_isolation()
     
     def _load_config(self):
-        """加载模型配置"""
+        """
+        加载模型配置
+        每次调用都重新从磁盘读取配置文件
+        """
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        print(f"[DEBUG] {current_time} - 加载配置文件 - 实例ID: {id(self)}")
+        
         if self.model_dir and (self.model_dir / "config.yaml").exists():
+            config_path = self.model_dir / "config.yaml"
+            print(f"[DEBUG] 找到配置文件: {config_path}")
+            
             try:
-                with open(self.model_dir / "config.yaml", 'r', encoding='utf-8') as f:
+                # 直接读取文件内容
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    old_config = self.config.copy() if self.config else {}
                     self.config = yaml.safe_load(f)
-                    logger.debug(f"为 {self.__class__.__name__} 加载配置: {self.config}")
+                    config_changed = old_config != self.config
+                    
+                    # 记录日志
+                    print(f"[DEBUG] 配置{'已更新' if config_changed else '未变化'}")
+                    if config_changed:
+                        logger.info(f"为 {self.__class__.__name__} 加载新配置")
+                        self._write_debug(f"配置文件更新: {self.config}")
             except Exception as e:
                 logger.error(f"加载配置文件时出错: {str(e)}")
-                self.config = {}
-    
-    def _init_llm(self) -> None:
-        """
-        初始化LLM配置，从配置文件、环境变量或.env文件中获取
-        """
-        if not LITELLM_AVAILABLE:
-            logger.warning("litellm未安装，LLM功能将不可用")
-            return
-            
-        try:
-            # 获取LLM配置
-            llm_config = self.config.get("llm", {}).get("default", {})
-            
-            # 从环境变量获取配置（优先级高于配置文件）
-            provider = os.environ.get("LLM_PROVIDER", llm_config.get("provider", "openai")).lower()
-            model = os.environ.get("LLM_MODEL", llm_config.get("model", "gpt-4"))
-            temperature = float(os.environ.get("LLM_TEMPERATURE", llm_config.get("temperature", 0.7)))
-            api_key = os.environ.get("LLM_API_KEY", llm_config.get("api_key", ""))
-            api_base = os.environ.get("LLM_API_BASE", llm_config.get("api_base", ""))
-            
-            # 如果没有提供API密钥，尝试从特定环境变量获取
-            if not api_key:
-                if provider == "openai":
-                    api_key = os.environ.get("OPENAI_API_KEY", "")
-                elif provider == "anthropic":
-                    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-                elif provider == "azure":
-                    api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
-            
-            # 如果没有提供API基础URL，尝试从特定环境变量获取
-            if not api_base:
-                if provider == "openai":
-                    api_base = os.environ.get("OPENAI_API_BASE", "")
-                elif provider == "anthropic":
-                    api_base = os.environ.get("ANTHROPIC_API_BASE", "")
-                elif provider == "azure":
-                    api_base = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
-                elif provider == "ollama":
-                    api_base = os.environ.get("OLLAMA_API_BASE", "http://localhost:11434")
-            
-            # 构建LLM配置
-            self.llm_config = {
-                "provider": provider,
-                "model": model,
-                "temperature": temperature,
-                "api_key": api_key,
-                "api_base": api_base
-            }
-            
-            # 如果是Azure，添加额外配置
-            if provider == "azure":
-                api_version = os.environ.get("AZURE_OPENAI_API_VERSION", llm_config.get("api_version", "2023-05-15"))
-                azure_deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT", llm_config.get("azure_deployment", model))
-                
-                self.llm_config["api_version"] = api_version
-                self.llm_config["azure_deployment"] = azure_deployment
-            
-            logger.info(f"已初始化LLM配置: {provider}/{model}")
-            
-        except Exception as e:
-            logger.error(f"初始化LLM配置时出错: {str(e)}")
-            self.llm_config = None
+                print(f"[DEBUG] 加载配置文件失败: {str(e)}")
+        else:
+            if not self.model_dir:
+                print(f"[DEBUG] 模型目录未设置")
+            else:
+                print(f"[DEBUG] 配置文件不存在: {self.model_dir / 'config.yaml'}")
     
     def _init_debug_file(self) -> None:
         """
@@ -139,8 +90,7 @@ class AnythingBaseModel(ABC):
             # 写入初始信息
             with open(self.debug_file, "w", encoding="utf-8") as f:
                 f.write(f"=== {self.__class__.__name__} 调试日志 - {timestamp} ===\n\n")
-                if self.llm_config:
-                    f.write(f"LLM配置: {json.dumps(self.llm_config, ensure_ascii=False, indent=2)}\n\n")
+                f.write(f"配置: {yaml.dump(self.config, allow_unicode=True)}\n\n")
             
             logger.info(f"调试日志将写入: {self.debug_file}")
         except Exception as e:
@@ -164,215 +114,6 @@ class AnythingBaseModel(ABC):
         except Exception as e:
             logger.error(f"写入调试信息时出错: {str(e)}")
     
-    def set_llm(self, llm_name: str) -> bool:
-        """
-        设置使用的LLM
-        
-        Args:
-            llm_name: LLM名称，对应配置文件中的alternatives键
-            
-        Returns:
-            是否成功设置
-        """
-        if not LITELLM_AVAILABLE:
-            logger.warning("litellm未安装，无法设置LLM")
-            return False
-            
-        # 获取备选LLM配置
-        alternatives = self.config.get("llm", {}).get("alternatives", {})
-        llm_config = alternatives.get(llm_name)
-        
-        if not llm_config:
-            logger.warning(f"未找到名为 {llm_name} 的LLM配置")
-            return False
-        
-        provider = llm_config.get("provider", "").lower()
-        model = llm_config.get("model", "")
-        temperature = llm_config.get("temperature", 0.7)
-        api_key = llm_config.get("api_key", "")
-        api_base = llm_config.get("api_base", "")
-        
-        # 如果没有提供API密钥，尝试从环境变量获取
-        if not api_key:
-            if provider == "openai":
-                api_key = os.environ.get("OPENAI_API_KEY", "")
-            elif provider == "anthropic":
-                api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-            elif provider == "azure":
-                api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
-        
-        # 如果没有提供API基础URL，尝试从环境变量获取
-        if not api_base:
-            if provider == "openai":
-                api_base = os.environ.get("OPENAI_API_BASE", "")
-            elif provider == "anthropic":
-                api_base = os.environ.get("ANTHROPIC_API_BASE", "")
-            elif provider == "azure":
-                api_base = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
-            elif provider == "ollama":
-                api_base = os.environ.get("OLLAMA_API_BASE", "http://localhost:11434")
-        
-        # 构建LLM配置
-        self.llm_config = {
-            "provider": provider,
-            "model": model,
-            "temperature": temperature,
-            "api_key": api_key,
-            "api_base": api_base
-        }
-        
-        # 如果是Azure，添加额外配置
-        if provider == "azure":
-            self.llm_config["api_version"] = llm_config.get("api_version", "2023-05-15")
-            self.llm_config["azure_deployment"] = llm_config.get("azure_deployment", model)
-        
-        logger.info(f"已切换LLM配置: {provider}/{model}")
-        return True
-    
-    async def _safe_callback(
-        self,
-        callback: Optional[Callable[[str], Awaitable[None]]],
-        content: str
-    ) -> None:
-        """
-        安全地调用回调函数，如果回调函数为空则忽略
-
-        Args:
-            callback: 回调函数，可能为None
-            content: 要发送的内容
-        """
-        if callback:
-            await callback(content)
-
-    async def _call_llm(
-        self, 
-        system_prompt: str, 
-        user_prompt: str, 
-        stream: bool = False,
-        stream_callback: Optional[Callable[[str], Awaitable[None]]] = None
-    ) -> str:
-        """
-        调用LiteLLM接口
-
-        Args:
-            system_prompt: 系统提示词
-            user_prompt: 用户提示词
-            stream: 是否使用流式输出
-            stream_callback: 流式输出回调函数，用于处理每个内容块
-
-        Returns:
-            LLM响应内容
-        """
-        if not LITELLM_AVAILABLE:
-            raise ImportError("litellm未安装，无法调用LLM")
-            
-        if not self.llm_config:
-            raise ValueError("LLM配置未初始化")
-            
-        try:
-            provider = self.llm_config["provider"]
-            model = self.llm_config["model"]
-            temperature = self.llm_config["temperature"]
-            api_key = self.llm_config["api_key"]
-            api_base = self.llm_config["api_base"]
-            
-            # 记录要发送给LLM的信息
-            logger.info(f"发送给LLM的信息 - 模型: {provider}/{model}, 温度: {temperature}")
-            logger.debug(f"系统提示词: {system_prompt}")
-            logger.debug(f"用户提示词: {user_prompt}")
-            
-            # 写入调试文件
-            self._write_debug(f"=== 发送给LLM的信息 ===")
-            self._write_debug(f"模型: {provider}/{model}, 温度: {temperature}")
-            self._write_debug(f"系统提示词:\n{system_prompt}")
-            self._write_debug(f"用户提示词:\n{user_prompt}")
-            
-            # 构建完整的模型名称
-            model_name = model
-            if provider == "openai":
-                model_name = f"openai/{model}"
-            elif provider == "anthropic":
-                model_name = f"anthropic/{model}"
-            elif provider == "ollama":
-                model_name = f"ollama/{model}"
-            elif provider == "azure":
-                model_name = f"azure/{model}"
-            
-            # 设置API基础URL
-            if api_base:
-                if provider == "openai":
-                    os.environ["OPENAI_API_BASE"] = api_base
-                elif provider == "anthropic":
-                    os.environ["ANTHROPIC_API_BASE"] = api_base
-                elif provider == "ollama":
-                    os.environ["OLLAMA_API_BASE"] = api_base
-            
-            # 设置API密钥
-            if api_key:
-                if provider == "openai":
-                    os.environ["OPENAI_API_KEY"] = api_key
-                elif provider == "anthropic":
-                    os.environ["ANTHROPIC_API_KEY"] = api_key
-                elif provider == "azure":
-                    os.environ["AZURE_OPENAI_API_KEY"] = api_key
-            
-            # 构建消息
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
-            
-            # 如果是Azure，添加额外配置
-            extra_params = {}
-            if provider == "azure":
-                extra_params["api_version"] = self.llm_config.get("api_version", "2023-05-15")
-                extra_params["azure_deployment"] = self.llm_config.get("azure_deployment", model)
-                extra_params["azure_endpoint"] = api_base
-            
-            # 调用LiteLLM
-            response = await litellm.acompletion(
-                model=model_name,
-                messages=messages,
-                temperature=temperature,
-                stream=stream,
-                **extra_params
-            )
-            
-            # 提取响应内容
-            if stream:
-                # 处理流式响应
-                full_response = ""
-                async for chunk in response:
-                    if chunk.choices and chunk.choices[0].delta.content:
-                        content_chunk = chunk.choices[0].delta.content
-                        full_response += content_chunk
-                        
-                        # 使用安全回调方法
-                        await self._safe_callback(stream_callback, content_chunk)
-                
-                # 写入调试文件
-                self._write_debug(f"=== LLM响应内容（流式） ===")
-                self._write_debug(full_response)
-                
-                return full_response
-            else:
-                # 处理普通响应
-                content = response.choices[0].message.content
-                logger.debug(f"LLM响应内容: {content}")
-                
-                # 写入调试文件
-                self._write_debug(f"=== LLM响应内容 ===")
-                self._write_debug(content)
-                
-                return content
-                
-        except Exception as e:
-            error_msg = f"调用LLM时出错: {str(e)}"
-            logger.error(error_msg)
-            self._write_debug(f"=== 错误 ===")
-            self._write_debug(error_msg)
-            raise
-
     def _setup_isolation(self):
         """Setup environment isolation if enabled in config"""
         print(f"\n[DEBUG] Setting up isolation for {self.__class__.__name__}")
@@ -447,17 +188,53 @@ class AnythingBaseModel(ABC):
     def model_dir(self) -> Optional[Path]:
         """Get model directory path"""
         if not self._model_dir:
-            # 获取模型类的模块文件路径
-            module_file = Path(sys.modules[self.__class__.__module__].__file__)
-            print(f"[DEBUG] Module file path: {module_file}")
-            
-            # 如果模块文件在 models 目录下，使用其所在目录作为模型目录
-            if "models" in module_file.parts:
-                models_index = module_file.parts.index("models")
-                self._model_dir = Path(*module_file.parts[:models_index+2])
-                self._model_dir = self._model_dir.resolve()  # 获取绝对路径
-                print(f"[DEBUG] Inferred model directory: {self._model_dir}")
+            try:
+                # 获取模型类的模块文件路径
+                class_module = self.__class__.__module__
+                print(f"[DEBUG] 当前类 {self.__class__.__name__} 的模块: {class_module}")
                 
+                if class_module not in sys.modules:
+                    print(f"[DEBUG] 错误: 模块 {class_module} 不在 sys.modules 中")
+                    print(f"[DEBUG] 可用模块: {list(sys.modules.keys())[:20]}...")  # 只打印前20个避免信息过多
+                    return None
+                
+                module_file = Path(sys.modules[class_module].__file__)
+                print(f"[DEBUG] 模块文件路径: {module_file}")
+                
+                # 如果模块文件在 models 目录下，使用其所在目录作为模型目录
+                if "models" in module_file.parts:
+                    models_index = module_file.parts.index("models")
+                    # 修改目录获取方式，确保获取到子类所在的具体模型目录
+                    self._model_dir = Path(*module_file.parts[:models_index+2])
+                    
+                    # 特殊处理：如果是多级结构如 models/agent_type/agent_name
+                    # 这里假设子类的实现文件放在其专属目录下
+                    module_dir = module_file.parent
+                    if module_dir.name != self._model_dir.name:
+                        # 如果模块所在目录名与models下一级目录名不同
+                        # 可能是更深层次的结构，使用模块所在目录
+                        self._model_dir = module_dir
+                    
+                    self._model_dir = self._model_dir.resolve()  # 获取绝对路径
+                    print(f"[DEBUG] 推断的模型目录: {self._model_dir}")
+                    
+                    # 检查推断的目录中是否存在配置文件
+                    if not (self._model_dir / "config.yaml").exists():
+                        print(f"[DEBUG] 警告: 推断的目录中没有找到 config.yaml 文件")
+                        
+                        # 尝试查找更接近实际实现的目录
+                        parent_dir = module_file.parent
+                        if (parent_dir / "config.yaml").exists():
+                            self._model_dir = parent_dir
+                            print(f"[DEBUG] 使用替代模型目录: {self._model_dir}")
+                else:
+                    print(f"[DEBUG] 警告: 模块文件路径中没有 'models' 目录")
+            except Exception as e:
+                print(f"[DEBUG] 获取模型目录时出错: {str(e)}")
+                import traceback
+                print(f"[DEBUG] 错误详情: {traceback.format_exc()}")
+                return None
+        
         return self._model_dir
     
     @model_dir.setter
@@ -475,8 +252,8 @@ class AnythingBaseModel(ABC):
     @abstractmethod
     async def on_chat_messages(
         self,
-        messages: List[Dict[str, str]],
-        callback: Optional[Callable[[str], Awaitable[None]]] = None
+        messages: List[Message],
+        callback: Optional[Callable[[str, bool], Awaitable[None]]] = None
     ) -> Optional[str]:
         """
         Core method for processing chat messages.
@@ -486,29 +263,39 @@ class AnythingBaseModel(ABC):
         Args:
             messages: List of messages, each message is a dictionary containing role and content
             callback: Async callback function for streaming output. If None, non-streaming mode
+                      The callback takes two parameters: content (str) and is_reasoning (bool)
+                      is_reasoning=True indicates this is reasoning content, not final answer
 
         Returns:
             If non-streaming mode (callback=None), returns complete response string
             If streaming mode (callback not None), returns None, content sent through callback
         """
+        # 在处理消息前重新加载配置
+        self._load_config()
         pass
 
     async def on_chat_start(self) -> None:
         """
         Hook method called when chat starts.
         """
+        # 在聊天开始前重新加载配置
+        self._load_config()
         pass
 
     async def on_chat_end(self) -> None:
         """
         Hook method called when chat ends.
         """
+        # 在聊天结束前重新加载配置
+        self._load_config()
         pass
 
     async def on_chat_stop(self) -> None:
         """
         Hook method called when chat stops.
         """
+        # 在聊天停止前重新加载配置
+        self._load_config()
         pass
 
     async def on_chat_resume(self, thread: str) -> None:
@@ -518,6 +305,8 @@ class AnythingBaseModel(ABC):
         Args:
             thread: Chat thread identifier.
         """
+        # 在聊天恢复前重新加载配置
+        self._load_config()
         pass
 
     def set_context(self, key: str, value: Any) -> None:

@@ -1,25 +1,21 @@
 from typing import List, Dict, Optional, Callable, Awaitable
-from app.models.vector_model import VectorModel
+from app.models.base import AnythingBaseModel
 
-class ContextAwareModel(VectorModel):
+class ContextAwareModel(AnythingBaseModel):
     """
     Context-aware model.
-    Capable of providing more intelligent responses based on conversation history and similarity search.
+    Simple implementation without vector storage dependency.
     """
+    
+    def __init__(self):
+        super().__init__()
+        self.contexts = []  # 使用简单的内存列表存储上下文
     
     async def on_chat_start(self) -> None:
         """
         Handler for chat start.
         """
         await super().on_chat_start()
-        # Add model description to vector store
-        await self.add_to_vector_store(
-            "This is a context-aware model that can remember conversation history and use similarity search to provide more intelligent responses.",
-            metadata={
-                "type": "context_aware",
-                "capabilities": ["context_search", "history_tracking"]
-            }
-        )
     
     async def on_chat_messages(
         self,
@@ -45,43 +41,21 @@ class ContextAwareModel(VectorModel):
             await callback("Processing your message...\n")
         responses.append("Processing your message...\n")
 
-        await self.add_context(
-            query,
-            metadata={
+        # 存储上下文到内存中
+        self.contexts.append({
+            "content": query,
+            "metadata": {
                 "type": "user_message",
                 "turn": len(messages)
             }
-        )
+        })
 
-        # 2. Search for relevant contexts
+        # 2. Build response directly
         if callback:
-            await callback("Searching for relevant contexts...\n")
-        responses.append("Searching for relevant contexts...\n")
+            await callback("Message received and processed.\n")
+        responses.append("Message received and processed.\n")
 
-        contexts = await self.search_similar_contexts(
-            query,
-            limit=3,
-            metadata_filter={"model_id": self.model_id}
-        )
-
-        # 3. Build response
-        if contexts:
-            if callback:
-                await callback("Found the following relevant contexts:\n")
-            responses.append("Found the following relevant contexts:\n")
-
-            for i, ctx in enumerate(contexts, 1):
-                response = f"{i}. {ctx['metadata']['content']}\n"
-                if callback:
-                    await callback(response)
-                responses.append(response)
-        else:
-            response = "No relevant historical context found.\n"
-            if callback:
-                await callback(response)
-            responses.append(response)
-
-        # 4. Generate final response
+        # 3. Generate final response
         final_response = f"\nProcessing completed for your input '{query}'."
         if callback:
             await callback(final_response)
@@ -95,4 +69,5 @@ class ContextAwareModel(VectorModel):
         Handler for chat end.
         """
         # Cleanup work can be done here
+        self.contexts = []  # 清空上下文
         await super().on_chat_end() 

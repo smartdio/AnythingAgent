@@ -1,0 +1,128 @@
+# Multi-Agent 模型配置
+model_info:
+  name: "Multi-Agent"
+  version: "0.1.0"
+  description: "基于Agent框架实现的高级分析模型，能够深入分析用户消息和系统消息，判断信息是否足够，并根据分析结果进行任务分解和执行。"
+
+# LLM配置
+llm:
+  # 默认LLM配置
+  default:
+    provider: "openai"  # 可选: openai, anthropic, ollama, azure, etc.
+    model: "qwq-32b"      # 模型名称
+    temperature: 0.5    # 温度参数
+    api_key: abcdefg # API密钥，留空则从环境变量读取
+    api_base: "http://127.0.0.1:1234/v1/"        # API基础URL，留空则从环境变量读取
+  
+  local:
+    provider: "openai"
+    model: "qwq-32b"
+    temperature: 0.5
+    api_key: "abc"
+    api_base: "http://127.0.0.1:1234/v1"
+  # Ollama本地模型配置
+  ollama:
+    provider: "ollama"
+    model: "qwq:latest"
+    api_base: "http://211.137.102.69:58001"
+    api_key: "abc"
+    temperature: 0.5
+
+# agent配置
+agents:
+  # Analyzer Agent配置
+  supervisor:
+    role: "supervisor"
+    goal: "You are a world-class supervisor agent, who has great expertise in supervising tasks given by the user."
+    description: |
+      You are a world-class supervisor agent, who has great expertise in supervising tasks given by the user.
+      **Task:**  
+      You are tasked with managing a conversation between the following workers:  
+      {members}
+      
+      ### Objectives of the members:
+      - **chat**: This agent is responsible for general chat conversations. He is a universal agent; if you are unsure which agent to assign to respond, please designate chat to handle the reply.      - **tool_agent:** The tool agent is equipped with a set of tools designed to enhance the quality and accuracy of responses to user queries.
+      - **planner**: Conducts in-depth analysis of plans for the agent. When users require more detailed and meticulous analysis based on the information and needs provided, the planner performs a more thorough and细致的分析。
+      
+      ### Steps to be followed:
+      1. When you receive a task, your main responsibility is to analyze the task and the dialogue text to determine which agent should be called next based on the above member goals.
+      2. If you cannot decide which agent is suitable, let the `chat` agent respond.
+      
+      ### Important Instructions:
+      - At each step, carefully analyze and delegate the appropriate worker. Always double-check before assigning tasks.
+      - Once all subtasks have been completed and the overall task is addressed, ensure that the final response is structured and coherent
+  # Planner Agent配置
+  planner:
+    role: "planner"
+    goal: "用专业的视角，规划分析的纲要"
+    description: |
+      你是一个专业任务规划师，根据用户的需求，规划分析的纲要。
+  # Worker Agent配置
+  worker:
+    role: "worker"
+    goal: "执行具体任务任务的回复，并返回结果"
+    description: |
+      你是一个专业的任务执行者，根据规划师的纲要，执行具体任务的回复，并返回结果。
+  # Chat Agent配置
+  chat:
+    role: "chat"
+    goal: "回答用户的问题"
+    description: "你是一个助理，回答用户各方面的问题。"
+
+# 任务模板
+tasks:
+  # 分析任务模板
+  supervisor-task:
+    description: |
+      {message}
+  # 规划任务模板
+  planner-task:
+    description: |
+      根据以下用户提供的信息， 深入分析，规划分析的纲要，然后交给其他agent来对每个大纲任务执行详细的回复：
+      用户提供的信息：
+      {message}
+
+      请将分析和提供指导的纲要，分解为具体的子任务，并以JSON格式返回。每个任务必须包含title和prompt两个字段，例如：
+      
+      [
+         {{
+          "id": "任务ID1",
+          "title": "任务标题1",
+          "prompt": "任务描述1",
+          "status": "pending"
+        }},
+        {{
+          "id": "任务ID2",
+          "title": "任务标题2",
+          "prompt": "任务描述2",
+          "status": "pending"
+        }}
+      ]
+      
+      注意：每个任务必须同时包含id、title和prompt,status字段，否则将无法正确执行。
+  
+  # 执行任务模板
+  worker-task:
+    description: |
+      用户提供的信息是：
+      {message}
+      ---------------------------------------------------------------------------------
+      按照计划，需要按以下纲要进行分析：
+      {tasks}
+      
+      目前已经完成以下分析：
+      {completed_tasks}
+      ---------------------------------------------------------------------------------
+      目前你需要执行以下主题分析并拟写评估意见：
+      
+      任务标题: {title}
+      任务描述: 
+      {prompt}
+
+  chat-task:
+    description: |
+      HISTORY CONTEXT:
+      {history}
+      ---------------------------------------------------------------------------------
+      USER MESSAGE:
+      {message}
